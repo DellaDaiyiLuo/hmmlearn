@@ -457,9 +457,12 @@ class _BaseHMM(BaseEstimator):
             curr_logprob = 0
             for i, j in iter_from_X_lengths(X, lengths):
                 framelogprob = self._compute_log_likelihood(X[i:j])
+                # pi_t(1), alpha_t(i), both in log domain
                 logprob, fwdlattice = self._do_forward_pass(framelogprob)
                 curr_logprob += logprob
+                # beta_t(i), in log domain
                 bwdlattice = self._do_backward_pass(framelogprob)
+                # gamma_t(i), NOT in log domain
                 posteriors = self._compute_posteriors(fwdlattice, bwdlattice)
                 self._accumulate_sufficient_statistics(
                     stats, X[i:j], framelogprob, posteriors, fwdlattice,
@@ -679,3 +682,8 @@ class _BaseHMM(BaseEstimator):
             self.transmat_ = np.where(self.transmat_ == 0.0,
                                       self.transmat_, transmat_)
             normalize(self.transmat_, axis=1)
+
+
+# TODO: line 679 seems odd to me; should'nt it be
+"""self.transmat_ = np.where(self.transmat_ == 0.0, transmat_, self.transmat_)"""
+# also, self.transmat_ is set to 1/n_components, and so should never be 0 by itself. If it was updated to be zero, then does the above try to force it to always stay zero??? Not sure about what it's intended to do yet.
