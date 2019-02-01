@@ -201,6 +201,7 @@ class _BaseHMM(BaseEstimator):
         self.tol = tol
         self.verbose = verbose
         self.monitor_ = ConvergenceMonitor(self.tol, self.n_iter, self.verbose)
+        self.final_logprob = None
 
     def score_samples(self, X, lengths=None):
         """Compute the log probability under the model and compute posteriors.
@@ -474,6 +475,7 @@ class _BaseHMM(BaseEstimator):
 
             self.monitor_.report(curr_logprob)
             if self.monitor_.converged:
+                self.final_logprob = curr_logprob
                 break
 
         return self
