@@ -285,7 +285,7 @@ class _BaseHMM(BaseEstimator):
 
     def _decode_map(self, X):
         _, posteriors = self.score_samples(X)
-        logprob = np.max(posteriors, axis=1).sum()
+        logprob = np.log(np.max(posteriors, axis=1)).sum()
         state_sequence = np.argmax(posteriors, axis=1)
         return logprob, state_sequence
 
