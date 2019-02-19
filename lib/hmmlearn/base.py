@@ -686,6 +686,6 @@ class _BaseHMM(BaseEstimator):
             normalize(self.transmat_, axis=1)
 
 
-# TODO: line 679 seems odd to me; should'nt it be
+# TODO: line 684 seems odd to me; should'nt it be
 """self.transmat_ = np.where(self.transmat_ == 0.0, transmat_, self.transmat_)"""
 # also, self.transmat_ is set to 1/n_components, and so should never be 0 by itself. If it was updated to be zero, then does the above try to force it to always stay zero??? Not sure about what it's intended to do yet.

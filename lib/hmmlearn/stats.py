@@ -100,7 +100,7 @@ def log_multivariate_poisson_density(X, means) :
     lpr =  np.dot(X, log_means.T)
     lpr = lpr - np.sum(means,axis=1) # rates for all elements are summed and then broadcast across the observation dimenension
     log_factorial = np.sum(gammaln(X + 1), axis=1)
-    lpr = lpr - log_factorial[:,None] # logfactobs vector broad cast across the state dimension
+    lpr = lpr - log_factorial[:,None] # logfactobs vector broadcast across the state dimension
 
     #print("lpr has shape {}".format(lpr.shape))
     return lpr
@@ -108,7 +108,7 @@ def log_multivariate_poisson_density(X, means) :
 def log_multivariate_gamma_density(X, shape, scale):
 
     """"
-    
+
     Parameters
     ==========
     X : np.ndarray, shape (n_samples, n_features)
@@ -153,4 +153,31 @@ def log_multivariate_gamma_density(X, shape, scale):
     term4 = np.dot(X, beta.T)
 
     lpr = term1 - term2 + term3 - term4
+    return lpr
+
+def log_marked_poisson_density(X, rates, n_clusters):
+    """Compute the log probability under a multivariate Gaussian marked
+    Poisson 'distribution'.
+
+    Parameters
+    ----------
+    X : array_like, shape (n_samples, n_clusters)
+        List of n_clusters-dimensional data points. Each row corresponds to a
+        single data point.
+    rates : array_like, shape (n_components, n_clusters)
+        List of n_clusters-dimensional relative rate vectors for n_components.
+        Each row corresponds to a single rate vector.
+    n_clusters : int
+        Dimensionality of the latent (independent) Poisson emissions.
+
+    Returns
+    -------
+    lpr : array_like, shape (n_samples, n_components)
+        Array containing the log probabilities of each sample in
+        X under each of the n_components mark distributions.
+    """
+
+    raise NotImplementedError
+    # multiprocessing here for sampling-based evaluation
+
     return lpr
