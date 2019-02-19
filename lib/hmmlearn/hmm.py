@@ -17,15 +17,22 @@ import numpy as np
 from scipy.special import logsumexp, digamma, polygamma
 from sklearn import cluster
 from sklearn.utils import check_random_state
+from scipy.stats import multivariate_normal
 
 from . import _utils
-from .stats import (log_multivariate_normal_density, 
+from .stats import (log_multivariate_normal_density,
                     log_multivariate_poisson_density,
-                    log_multivariate_gamma_density)
+                    log_multivariate_gamma_density,
+                    log_marked_poisson_density)
 from .base import _BaseHMM
 from .utils import iter_from_X_lengths, normalize, fill_covars
 
-__all__ = ["GMMHMM", "GaussianHMM", "MultinomialHMM"]
+__all__ = ["GMMHMM",
+           "GaussianHMM",
+           "MultinomialHMM",
+           "PoissonHMM",
+           "GammaHMM",
+           "MarkedPoissonHMM"]
 
 COVARIANCE_TYPES = frozenset(("spherical", "diag", "full", "tied"))
 
@@ -367,8 +374,8 @@ class MultinomialHMM(_BaseHMM):
     --------
     >>> from hmmlearn.hmm import MultinomialHMM
     >>> MultinomialHMM(n_components=2)
-    ...                             #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
-    MultinomialHMM(algorithm='viterbi',...
+                                 #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+    MultinomialHMM(algorithm='viterbi',...)
     """
     # TODO: accept the prior on emissionprob_ for consistency.
     def __init__(self, n_components=1,
@@ -992,7 +999,7 @@ class GMMHMM(_BaseHMM):
 
 class PoissonHMM(_BaseHMM):
     """Hidden Markov Model with independent Poisson emissions.
-    
+
     Parameters
     ----------
     n_components : int
@@ -1022,9 +1029,9 @@ class PoissonHMM(_BaseHMM):
     init_params : string, optional
         Controls which parameters are initialized prior to
         training.  Can contain any combination of 's' for
-        startprob, 't' for transmat, 'm' for means and 'c' for covars.
+        startprob, 't' for transmat, and 'm' for means.
         Defaults to all parameters.
-    
+
     Attributes
     ----------
     n_components : int
@@ -1046,13 +1053,13 @@ class PoissonHMM(_BaseHMM):
     ...                             #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     PoissonHMM(algorithm='viterbi',...)
     """
-    
+
     def __init__(self, n_components=1,
                  startprob_prior=1.0, transmat_prior=1.0,
                  means_prior=0, means_weight=0,
                  algorithm="viterbi", random_state=None,
                  n_iter=10, tol=1e-2, verbose=False,
-                 params="stmc", init_params="stmc"):
+                 params="stm", init_params="stm"):
         _BaseHMM.__init__(self, n_components,
                           startprob_prior=startprob_prior,
                           transmat_prior=transmat_prior, algorithm=algorithm,
@@ -1119,10 +1126,9 @@ class PoissonHMM(_BaseHMM):
             self.means_ = np.where(self.means_ > 1e-3, self.means_, 1e-3)
 
 
-
 class GammaHMM(_BaseHMM):
     """Hidden Markov Model with independent Gamma emissions.
-    
+
     Parameters
     ----------
     n_components : int
@@ -1249,7 +1255,7 @@ class GammaHMM(_BaseHMM):
             stats['post'] += posteriors.sum(axis=0, keepdims=True)
             stats['num'] += np.dot(posteriors.T, obs)
             stats['num_log'] += np.dot(posteriors.T, np.log(obs))
-    
+
     def _do_mstep(self, stats):
         super(GammaHMM, self)._do_mstep(stats)
 
@@ -1257,8 +1263,8 @@ class GammaHMM(_BaseHMM):
         if 'p' in self.params:
             logx_bar = stats['num_log'] / stats['post'].T
             M = np.log(x_bar) - logx_bar
-            self.shapes_ = (self.shapes_ - 
-                           ((np.log(self.shapes_) - digamma(self.shapes_) - M) / 
+            self.shapes_ = (self.shapes_ -
+                           ((np.log(self.shapes_) - digamma(self.shapes_) - M) /
                             (1/self.shapes_ - polygamma(1, self.shapes_))) )
             # The shape and scale parameter estimation can blow up if one of them
             # is a very small value, due to their inverse relationship.
@@ -1267,3 +1273,200 @@ class GammaHMM(_BaseHMM):
         if 'l' in self.params:
             self.scales_ = x_bar / self.shapes_
             self.scales_ = np.where(self.scales_ > 1e-3, self.scales_, 1e-3)
+
+
+class MarkedPoissonHMM(_BaseHMM):
+    """Hidden Markov Model with independent Poisson emissions, where only marks
+       are observed, and not the identities of the clusters.
+
+    Parameters
+    ----------
+    n_components : int
+        Number of states.
+    n_clusters : int
+        Dimensionality of the latent (independent) Poisson emissions.
+    mu : array, shape (n_clusters, n_cluster_dims)
+        Multivariate Gaussian cluster means.
+    Sigma : array, shape (n_clusters, n_cluster_dims, n_cluster_dims)
+        Multivariate Gaussian cluster covariances.
+    startprob_prior : array, shape (n_components, )
+        Initial state occupation prior distribution.
+    transmat_prior : array, shape (n_components, n_components)
+        Matrix of prior transition probabilities between states.
+
+    Attributes
+    ----------
+    n_components : int
+        Number of states.
+    n_clusters : int
+        Dimensionality of the latent (independent) Poisson emissions.
+    monitor_ : ConvergenceMonitor
+        Monitor object used to check the convergence of EM.
+    transmat_ : array, shape (n_components, n_components)
+        Matrix of transition probabilities between states.
+    startprob_ : array, shape (n_components, )
+        Initial state occupation distribution.
+    relrates_ : array, shape (n_components, n_clusters)
+        Relative rate parameters for each state. Relative rates
+        over n_clusters, so that each row sums to one.
+
+    Notes
+    -----
+    Observations are expected to have shape (n_samples, ) with each
+    element being an array with shape (n_marks, mark_dims). It is
+    therefore a ragged array. Ragged arrays can be created be e.g.
+    by marks = np.array(n_samples*[None]), and then setting each
+    element accordingly.
+
+    Examples
+    --------
+    """
+
+    def __init__(self, n_components=1, n_clusters=1, n_cluster_dims=1,
+                 mu=None, Sigma=None, covariance_type='diag',
+                 startprob_prior=1.0, transmat_prior=1.0,
+                 relrates_prior=0, relrates_weight=0,
+                 algorithm="viterbi", random_state=None,
+                 n_iter=10, tol=1e-2, verbose=False,
+                 params="str", init_params="strc"):
+        _BaseHMM.__init__(self, n_components,
+                          startprob_prior=startprob_prior,
+                          transmat_prior=transmat_prior, algorithm=algorithm,
+                          random_state=random_state, n_iter=n_iter,
+                          tol=tol, params=params, verbose=verbose,
+                          init_params=init_params)
+
+        self.relrates_prior = relrates_prior
+        self.relrates_weight = relrates_weight
+        self.clusters = dict()
+        self.clusters['n_clusters'] = n_clusters
+        self.clusters['n_cluster_dims'] = n_cluster_dims
+        self.clusters['mu'] = mu
+        self.clusters['Sigma'] = Sigma
+        self.clusters['covariance_type'] = covariance_type
+
+    def _check(self):
+        super(MarkedPoissonHMM, self)._check()
+
+        self.relrates = np.asarray(self.relrates_)
+        assert self.clusters['n_clusters'] == self.relrates_.shape[1]
+
+        assert self.clusters['mu'].shape[0] == self.clusters['n_clusters']
+        assert self.clusters['mu'].shape[1] == self.clusters['n_cluster_dims']
+
+        assert self.clusters['Sigma'].shape[0] == self.clusters['n_clusters']
+        assert self.clusters['Sigma'].shape[1] == self.clusters['n_cluster_dims']
+        assert self.clusters['Sigma'].shape[2] == self.clusters['n_cluster_dims']
+
+    def _compute_log_likelihood(self, obs):
+        return log_marked_poisson_density(obs, self.relrates_, self.n_clusters)
+
+    def _generate_sample_from_state(self, state, random_state=None):
+        raise NotImplementedError
+
+    def _init(self, X, lengths=None):
+        super(MarkedPoissonHMM, self)._init(X, lengths=lengths)
+
+        if 'c' in self.init_params:
+            # do GMM here to estimate cluster means and covariances.
+
+            import itertools
+            from scipy import linalg
+            from sklearn import mixture
+
+            flattened = []
+            for mm in X:
+                for mmm in mm:
+                    flattened.append(mmm)
+            flattened = np.array(flattened)
+
+            gmm = mixture.GaussianMixture(n_components=self.clusters['n_clusters'],
+                                  covariance_type=self.clusters['covariance_type'])
+            gmm.fit(X)
+
+            mu = gmm.means_
+            Sigma = gmm.covariances_
+
+            if len(Sigma.shape) < 3:
+                Sigma_ = np.zeros((self.clusters['n_clusters'], self.clusters['n_cluster_dims'], self.clusters['n_cluster_dims']))
+                for cc in range(self.clusters['n_clusters']):
+                    Sigma_[cc,:,:] = np.diag(Sigma[cc])
+
+                Sigma = Sigma_
+
+            self.clusters['mu'] = mu
+            self.clusters['Sigma'] = Sigma
+
+        if 'r' in self.init_params or not hasattr(self, "relrates_"):
+            raise NotImplementedError
+            # maybe do gamma-sampled normalized rates?
+            # self.relrates_ = initrates
+
+    def _initialize_sufficient_statistics(self):
+        stats = super(MarkedPoissonHMM, self)._initialize_sufficient_statistics()
+        stats['post'] = np.zeros(self.n_components)
+        stats['numerator'] = np.zeros((self.n_components, self.self.clusters['n_clusters']))
+        return stats
+
+    def _accumulate_sufficient_statistics(self, stats, obs, framelogprob,
+                                          posteriors, fwdlattice, bwdlattice):
+        super(MarkedPoissonHMM, self)._accumulate_sufficient_statistics(
+            stats, obs, framelogprob, posteriors, fwdlattice, bwdlattice)
+
+        # stats['post'] contains (n_samples, n_components) posteriors over states (gammas)
+        # stats['numerator'] contains (n_components, n_clusters) rate updates
+
+        if 'r' in self.params:
+            stats['post'] += posteriors.sum(axis=0)
+
+            # expected rates (n_samples, n_clusters), where n_clusters is the
+            # latent number of neurons.
+
+            n_samples = len(obs)
+            N = self.clusters['n_clusters']
+            Z = self.n_components
+            mu = self.clusters['mu']
+            Sigma = self.clusters['Sigma']
+
+            numerator = np.zeros((Z, N))
+
+            R = self.relrates
+
+            for zz in range(Z):
+                r = R[zz,:].squeeze()
+                expected_rates = np.zeros((n_samples, N))
+
+                for mm, marks in enumerate(obs):
+                    K = len(marks)
+
+                    logF = np.zeros((N, K))
+                    for nn in range(N):
+                        mvn = multivariate_normal(mean=mu[nn], cov=Sigma[nn])
+                        f = np.log(mvn.pdf(marks))
+                        logF[nn,:] = f
+
+                    den = logsumexp((logF.T + np.log(r)).T , axis=0)
+
+                    logmnp = np.zeros((N,K))
+                    for nn in range(N):
+                        for kk in range(K):
+                            logmnp[nn,kk] = logF[nn,kk] + np.log(r[nn]) - den[kk]
+
+                    expected_rates[mm,:] = np.exp(logsumexp(logmnp, axis=1) - np.log(K))
+                numerator[zz,:] = np.dot(posteriors[:,zz].T, expected_rates
+
+            # stats['numerator'] += np.dot(posteriors.T, expected_rates)
+            stats['numerator'] += numerator
+
+    def _do_mstep(self, stats):
+        raise NotImplementedError
+        super(MarkedPoissonHMM, self)._do_mstep(stats)
+
+        means_prior = self.means_prior
+        means_weight = self.means_weight
+
+        denom = stats['post'][:, np.newaxis]
+        if 'm' in self.params:
+            self.means_ = ((means_weight * means_prior + stats['numerator'])
+                           / (means_weight + denom))
+            self.means_ = np.where(self.means_ > 1e-3, self.means_, 1e-3)
