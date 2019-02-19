@@ -1453,20 +1453,19 @@ class MarkedPoissonHMM(_BaseHMM):
                             logmnp[nn,kk] = logF[nn,kk] + np.log(r[nn]) - den[kk]
 
                     expected_rates[mm,:] = np.exp(logsumexp(logmnp, axis=1) - np.log(K))
-                numerator[zz,:] = np.dot(posteriors[:,zz].T, expected_rates
+                numerator[zz,:] = np.dot(posteriors[:,zz].T, expected_rates)
 
-            # stats['numerator'] += np.dot(posteriors.T, expected_rates)
             stats['numerator'] += numerator
 
     def _do_mstep(self, stats):
-        raise NotImplementedError
         super(MarkedPoissonHMM, self)._do_mstep(stats)
 
-        means_prior = self.means_prior
-        means_weight = self.means_weight
+        relrates_prior = self.relrates_prior
+        relrates_weight = self.relrates_weight
 
         denom = stats['post'][:, np.newaxis]
-        if 'm' in self.params:
-            self.means_ = ((means_weight * means_prior + stats['numerator'])
-                           / (means_weight + denom))
-            self.means_ = np.where(self.means_ > 1e-3, self.means_, 1e-3)
+        if 'r' in self.params:
+            self.relrates_ = ((relrates_weight * relrates_prior + stats['numerator'])
+                           / (relrates_weight + denom))
+            self.relrates_ = np.where(self.relrates_ > 1e-3, self.relrates_, 1e-3)
+            self.relrates_ = self.relrates_/np.sum(self.relrates_)
