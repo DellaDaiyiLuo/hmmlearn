@@ -1322,9 +1322,9 @@ class MarkedPoissonHMM(_BaseHMM):
     --------
     """
 
-    def __init__(self, n_components=1, n_clusters=1, n_cluster_dims=1,
+    def __init__(self, n_components=1, n_clusters=1,
                  cluster_means=None, cluster_covars=None, covariance_type='diag',
-                 min_rate=0,
+                 min_rate=0, rate_mode='absolute',
                  startprob_prior=1.0, transmat_prior=1.0,
                  relrates_prior=0, relrates_weight=0,
                  algorithm="viterbi", random_state=None,
@@ -1337,13 +1337,13 @@ class MarkedPoissonHMM(_BaseHMM):
                           tol=tol, params=params, verbose=verbose,
                           init_params=init_params)
 
+        self.rate_mode = rate_mode
         self.min_rate = min_rate
         self.relrates_prior = relrates_prior
         self.relrates_weight = relrates_weight
         self.n_samples = int(n_samples)
         self.clusters = dict()
         self.clusters['n_clusters'] = n_clusters
-        self.clusters['n_cluster_dims'] = n_cluster_dims
         self.clusters['cluster_means'] = cluster_means
         self.clusters['cluster_covars'] = cluster_covars
         self.clusters['covariance_type'] = covariance_type
@@ -1372,7 +1372,7 @@ class MarkedPoissonHMM(_BaseHMM):
                                 self.clusters['n_clusters'])
 
         assert self.clusters['cluster_means'].shape[0] == self.clusters['n_clusters']
-        assert self.clusters['cluster_means'].shape[1] == self.clusters['n_cluster_dims']
+        self.clusters['n_cluster_dims'] = self.clusters['cluster_means'].shape[1]
 
         assert self.covars_.shape[0] == self.clusters['n_clusters']
         assert self.covars_.shape[1] == self.clusters['n_cluster_dims']
@@ -1464,7 +1464,10 @@ class MarkedPoissonHMM(_BaseHMM):
                             for kk in range(K):
                                 logmnp[nn,kk] = logF[nn,kk] + np.log(r[nn]) - den[kk]
 
-                        expected_rates[mm,:] = np.exp(logsumexp(logmnp, axis=1) - np.log(K))
+                        if self.rate_mode == 'relative':
+                            expected_rates[mm,:] = np.exp(logsumexp(logmnp, axis=1) - np.log(K))
+                        elif self.rate_mode == 'absolute':
+                            expected_rates[mm,:] = np.exp(logsumexp(logmnp, axis=1))
                     else:
                         expected_rates[mm,:] = np.ones(N) * self.min_rate
 
@@ -1483,4 +1486,5 @@ class MarkedPoissonHMM(_BaseHMM):
             self.relrates_ = ((relrates_weight * relrates_prior + stats['numerator'])
                            / (relrates_weight + denom))
             self.relrates_ = np.where(self.relrates_ > 1e-3, self.relrates_, 1e-3)
-            self.relrates_ = (self.relrates_.T/np.sum(self.relrates_, axis=1)).T
+            if self.rate_mode == 'relative':
+                self.relrates_ = (self.relrates_.T/np.sum(self.relrates_, axis=1)).T
