@@ -1327,7 +1327,7 @@ class MarkedPoissonHMM(_BaseHMM):
                  startprob_prior=1.0, transmat_prior=1.0,
                  relrates_prior=0, relrates_weight=0,
                  algorithm="viterbi", random_state=None,
-                 n_iter=10, tol=1e-2, verbose=False,
+                 n_iter=10, n_samples=1e6, tol=1e-2, verbose=False,
                  params="str", init_params="strc"):
         _BaseHMM.__init__(self, n_components,
                           startprob_prior=startprob_prior,
@@ -1338,6 +1338,7 @@ class MarkedPoissonHMM(_BaseHMM):
 
         self.relrates_prior = relrates_prior
         self.relrates_weight = relrates_weight
+        self.n_samples = n_samples
         self.clusters = dict()
         self.clusters['n_clusters'] = n_clusters
         self.clusters['n_cluster_dims'] = n_cluster_dims
@@ -1415,9 +1416,10 @@ class MarkedPoissonHMM(_BaseHMM):
             self.clusters['cluster_covars'] = gmm.covariances_
 
         if 'r' in self.init_params or not hasattr(self, "relrates_"):
-            raise NotImplementedError
             # maybe do gamma-sampled normalized rates?
-            # self.relrates_ = initrates
+            r = np.random.gamma(1,1, size=(self.n_components, self.clusters['n_clusters']))
+            r = (r.T/np.sum(r, axis=1)).T
+            self.relrates_ = r
 
     def _initialize_sufficient_statistics(self):
         stats = super(MarkedPoissonHMM, self)._initialize_sufficient_statistics()

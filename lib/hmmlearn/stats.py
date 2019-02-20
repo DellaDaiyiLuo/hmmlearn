@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import linalg
-from scipy.special import gammaln
-
+from scipy.special import logsumexp, gammaln
+from scipy.stats import multivariate_normal
 
 def log_multivariate_normal_density(X, means, covars, covariance_type='diag'):
     """Compute the log probability under a multivariate Gaussian distribution.
@@ -127,10 +127,10 @@ def log_multivariate_gamma_density(X, shape, scale):
         (latent state) given the parameters
     """
 
-    # The log likelihood is given by 
-    # log L(alpha, beta|X) = 
+    # The log likelihood is given by
+    # log L(alpha, beta|X) =
     #     alpha*log(beta) - log(gamma(alpha)) + (alpha - 1)*log(X) - beta*X
-    # For X with shape (1, n_features), and parameters with 
+    # For X with shape (1, n_features), and parameters with
     # shape (n_components, n_features), this results in an output of shape
     # (n_components, n_features). Assuming each feature is independent of
     # the others, we sum the output array across all features (equivalent to
@@ -155,29 +155,179 @@ def log_multivariate_gamma_density(X, shape, scale):
     lpr = term1 - term2 + term3 - term4
     return lpr
 
-def log_marked_poisson_density(X, rates, n_clusters):
+def log_marked_poisson_density(X, rates, clusters, n_samples):
     """Compute the log probability under a multivariate Gaussian marked
     Poisson 'distribution'.
 
     Parameters
     ----------
-    X : array_like, shape (n_samples, n_clusters)
-        List of n_clusters-dimensional data points. Each row corresponds to a
-        single data point.
+    X : array_like, shape (n_obs, )
+        List of mark features. Each element is a (K, D) array, where K is the
+        number of marks in the particular observation, and D is the mark feature
+        dimension.
     rates : array_like, shape (n_components, n_clusters)
         List of n_clusters-dimensional relative rate vectors for n_components.
         Each row corresponds to a single rate vector.
-    n_clusters : int
-        Dimensionality of the latent (independent) Poisson emissions.
 
     Returns
     -------
-    lpr : array_like, shape (n_samples, n_components)
+    lpr : array_like, shape (n_obs, n_components)
         Array containing the log probabilities of each sample in
         X under each of the n_components mark distributions.
     """
 
-    raise NotImplementedError
-    # multiprocessing here for sampling-based evaluation
+    def sample_IKR(r, *, K=None, N=None, M=None, mode='id'):
+        """Sample I^K|R.
+
+        Note that 1^K|R is called I^K|R because we cannot have variables
+        that start with a number in Python.
+
+        Parameters
+        ----------
+        r : array-like
+            Relative rates of shape (N,) for current time window, and state
+        K : int, optional
+            Number of events to sample, default is one.
+        N : int, optional
+            Number of neurons, if not specified, will be obtained from R.
+        M : int, optional
+            Number of length-K samples to generate. Default is one.
+        mode : str, optional
+            String specifying output mode. Default is 'id'.
+            Alternative is 'ek', which returns the sequence of vectors.
+
+        Returns
+        -------
+        ikr : samples with shape (M, K) if mode=='id', and with shape (M, N, K)
+            if mode=='ek'
+
+        Example
+        -------
+        >>> r = [0.1, 0.4, 0.2]
+        >>> ikr = sample_IKR(r=r, K=30, M=20, mode='id')
+
+        """
+
+        if K is None:
+            K = 1
+        if M is None:
+            M = 1
+        if N is None:
+            N = len(r)
+
+        p = r / np.sum(r) # only want to do this once!
+
+        if mode == 'id':
+            ikr = np.random.choice(a=N, size=K*M, p=p )
+            ikr = np.reshape(ikr, (M, K))
+        elif mode == 'ek':
+            ikr = np.random.multinomial(n=1, pvals=p, size=K*M)
+            ikr = np.reshape(ikr, (K, M, N)).transpose([1,2,0])
+        else:
+            raise ValueError("mode '{}' not understood.".format(mode))
+
+        return ikr
+
+    def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma):
+        """
+        Compute P(Y=marks | I^K), where I^K ~ rates.
+
+        Strategy: first pre-compute the NxK likelihood of observing
+        each mark from every neuron. Then use this matrix to compute
+        the rest.
+
+        Parameters
+        ----------
+        marks : array-like, with shape (K, D)
+            Observed marks, with shape (K, D), where D is the dimensionality
+            of the mark space, and K is the number of observed marks.
+
+        ikr : array-like, with shape (M, K)
+            Sampled neuron IDs for each sample, and each mark.
+        mu : array-like, with shape (N, D)
+            D-dimensional means for each of the N neurons.
+        Sigma : array-like, with shape (N, D, D)
+            D-by-D-dimensional covariances for each of the N neurons.
+
+        Returns
+        -------
+        ll : log likelihoods for each sample. Shape (M,)
+        """
+        N = len(mu)
+        M, K = ikr.shape
+
+        logF = np.zeros((N, K))
+
+        for nn in range(N):
+            mvn = multivariate_normal(mean=mu[nn], cov=Sigma[nn])
+            f = np.log(mvn.pdf(marks))
+            logF[nn,:] = f
+
+        ll = np.zeros(M)
+        krange = np.arange(K)
+        for ii in range(M):
+            ll[ii] = np.sum(logF[ikr[ii], krange])
+
+        return ll
+
+    def eval_P_Y_given_ISR(*, marks, r, mu, Sigma, M):
+        """
+        Appriximate P(Y=marks | r_t^{(j)}) by sampling I^K|R.
+
+        We use logsumexp to make this numerically more stable.
+
+        Parameters
+        ----------
+        marks : array-like, with shape (K, D)
+            Observed marks, with shape (K, D), where D is the dimensionality
+            of the mark space, and K is the number of observed marks.
+        r : array-like
+            Relative rates of shape (N,) for current time window, and state
+        mu : array-like, with shape (N, D)
+            D-dimensional means for each of the N neurons.
+        Sigma : array-like, with shape (N, D, D)
+            D-by-D-dimensional covariances for each of the N neurons.
+
+        Returns
+        -------
+        logP : log probability of observing sequence of marks
+
+        """
+        K = len(marks)
+
+        ikr = sample_IKR(r=r,
+                        K=K,
+                        M=M,
+                        mode='id')
+
+        ll = eval_mark_loglikelihoods(marks=marks,
+                                    ikr=ikr,
+                                    mu=mu,
+                                    Sigma=Sigma)
+
+        logP = logsumexp(ll) - np.log(M)
+
+        return logP
+
+    import multiprocessing as mp
+    import psutil
+
+    n_processes = psutil.cpu_count()
+    pool = mp.Pool(processes=n_processes)
+
+    n_components, n_clusters = rates.shape
+    n_obs = len(X)
+    lpr = np.zeros((n_obs, n_components))
+
+    for zz in range(n_components):
+        r = rates[zz,:].squeeze()
+        results = [pool.apply_async(eval_P_Y_given_ISR,
+            kwds={'marks' : obs,
+                  'r' : r,
+                  'mu': clusters['cluster_means'],
+                  'Sigma' : clusters['cluster_covars'],
+                  'M' : n_samples}) for obs in X]
+        results = [p.get() for p in results]
+        lpr[:,zz] = results
 
     return lpr
