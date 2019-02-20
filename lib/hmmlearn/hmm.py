@@ -1324,6 +1324,7 @@ class MarkedPoissonHMM(_BaseHMM):
 
     def __init__(self, n_components=1, n_clusters=1, n_cluster_dims=1,
                  cluster_means=None, cluster_covars=None, covariance_type='diag',
+                 min_rate=0,
                  startprob_prior=1.0, transmat_prior=1.0,
                  relrates_prior=0, relrates_weight=0,
                  algorithm="viterbi", random_state=None,
@@ -1336,6 +1337,7 @@ class MarkedPoissonHMM(_BaseHMM):
                           tol=tol, params=params, verbose=verbose,
                           init_params=init_params)
 
+        self.min_rate = min_rate
         self.relrates_prior = relrates_prior
         self.relrates_weight = relrates_weight
         self.n_samples = int(n_samples)
@@ -1448,20 +1450,24 @@ class MarkedPoissonHMM(_BaseHMM):
                 for mm, marks in enumerate(obs):
                     K = len(marks)
 
-                    logF = np.zeros((N, K))
-                    for nn in range(N):
-                        mvn = multivariate_normal(mean=cluster_means[nn], cov=covars[nn])
-                        f = np.log(mvn.pdf(marks))
-                        logF[nn,:] = f
+                    if K > 0:
+                        logF = np.zeros((N, K))
+                        for nn in range(N):
+                            mvn = multivariate_normal(mean=cluster_means[nn], cov=covars[nn])
+                            f = np.log(mvn.pdf(marks))
+                            logF[nn,:] = f
 
-                    den = logsumexp((logF.T + np.log(r)).T , axis=0)
+                        den = logsumexp((logF.T + np.log(r)).T , axis=0)
 
-                    logmnp = np.zeros((N,K))
-                    for nn in range(N):
-                        for kk in range(K):
-                            logmnp[nn,kk] = logF[nn,kk] + np.log(r[nn]) - den[kk]
+                        logmnp = np.zeros((N,K))
+                        for nn in range(N):
+                            for kk in range(K):
+                                logmnp[nn,kk] = logF[nn,kk] + np.log(r[nn]) - den[kk]
 
-                    expected_rates[mm,:] = np.exp(logsumexp(logmnp, axis=1) - np.log(K))
+                        expected_rates[mm,:] = np.exp(logsumexp(logmnp, axis=1) - np.log(K))
+                    else:
+                        expected_rates[mm,:] = np.ones(N) * self.min_rate
+
                 numerator[zz,:] = np.dot(posteriors[:,zz].T, expected_rates)
 
             stats['numerator'] += numerator
