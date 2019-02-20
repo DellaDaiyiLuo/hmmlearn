@@ -332,7 +332,7 @@ class _BaseHMM(BaseEstimator):
             "map": self._decode_map
         }[algorithm]
 
-        X = check_array(X)
+        # X = check_array(X)
         n_samples = X.shape[0]
         logprob = 0
         state_sequence = np.empty(n_samples, dtype=int)
@@ -448,7 +448,7 @@ class _BaseHMM(BaseEstimator):
         self : object
             Returns self.
         """
-        X = check_array(X)
+        # X = check_array(X)
         self._init(X, lengths=lengths)
         self._check()
 

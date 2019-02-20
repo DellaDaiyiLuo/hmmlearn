@@ -1338,7 +1338,7 @@ class MarkedPoissonHMM(_BaseHMM):
 
         self.relrates_prior = relrates_prior
         self.relrates_weight = relrates_weight
-        self.n_samples = n_samples
+        self.n_samples = int(n_samples)
         self.clusters = dict()
         self.clusters['n_clusters'] = n_clusters
         self.clusters['n_cluster_dims'] = n_cluster_dims
@@ -1354,19 +1354,19 @@ class MarkedPoissonHMM(_BaseHMM):
 
     @covars_.setter
     def covars_(self, covars):
-        self._covars_ = np.asarray(covars).copy()
+        self.clusters['cluster_covars'] = np.asarray(covars).copy()
 
     def _check(self):
         super(MarkedPoissonHMM, self)._check()
 
-        self.relrates = np.asarray(self.relrates_)
+        self.relrates_ = np.asarray(self.relrates_)
         assert self.clusters['n_clusters'] == self.relrates_.shape[1]
 
         if self.clusters['covariance_type'] not in COVARIANCE_TYPES:
             raise ValueError('covariance_type must be one of {}'
                              .format(COVARIANCE_TYPES))
 
-        _utils._validate_covars(self._covars_, self.clusters['covariance_type'],
+        _utils._validate_covars(self.clusters['cluster_covars'], self.clusters['covariance_type'],
                                 self.clusters['n_clusters'])
 
         assert self.clusters['cluster_means'].shape[0] == self.clusters['n_clusters']
@@ -1377,7 +1377,7 @@ class MarkedPoissonHMM(_BaseHMM):
         assert self.covars_.shape[2] == self.clusters['n_cluster_dims']
 
     def _compute_log_likelihood(self, obs):
-        return log_marked_poisson_density(obs, self.relrates_, self.clusters['n_clusters']) # pass in number of samples to use for approximation
+        return log_marked_poisson_density(obs, self.relrates_, self.clusters, self.n_samples) # pass in number of samples to use for approximation
 
     def _generate_sample_from_state(self, state, random_state=None):
         raise NotImplementedError
@@ -1400,17 +1400,7 @@ class MarkedPoissonHMM(_BaseHMM):
 
             gmm = mixture.GaussianMixture(n_components=self.clusters['n_clusters'],
                                   covariance_type=self.clusters['covariance_type'])
-            gmm.fit(X)
-
-            # cluster_means = gmm.means_
-            # cluster_covars = gmm.covariances_
-
-            # if len(Sigma.shape) < 3:
-            #     Sigma_ = np.zeros((self.clusters['n_clusters'], self.clusters['n_cluster_dims'], self.clusters['n_cluster_dims']))
-            #     for cc in range(self.clusters['n_clusters']):
-            #         Sigma_[cc,:,:] = np.diag(Sigma[cc])
-
-            #     Sigma = Sigma_
+            gmm.fit(flattened)
 
             self.clusters['cluster_means'] = gmm.means_
             self.clusters['cluster_covars'] = gmm.covariances_
@@ -1449,7 +1439,7 @@ class MarkedPoissonHMM(_BaseHMM):
 
             numerator = np.zeros((Z, N))
 
-            R = self.relrates
+            R = self.relrates_
 
             for zz in range(Z):
                 r = R[zz,:].squeeze()
@@ -1487,4 +1477,4 @@ class MarkedPoissonHMM(_BaseHMM):
             self.relrates_ = ((relrates_weight * relrates_prior + stats['numerator'])
                            / (relrates_weight + denom))
             self.relrates_ = np.where(self.relrates_ > 1e-3, self.relrates_, 1e-3)
-            self.relrates_ = self.relrates_/np.sum(self.relrates_)
+            self.relrates_ = (self.relrates_.T/np.sum(self.relrates_, axis=1)).T
