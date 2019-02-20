@@ -1323,7 +1323,7 @@ class MarkedPoissonHMM(_BaseHMM):
     """
 
     def __init__(self, n_components=1, n_clusters=1, n_cluster_dims=1,
-                 mu=None, Sigma=None, covariance_type='diag',
+                 cluster_means=None, cluster_covars=None, covariance_type='diag',
                  startprob_prior=1.0, transmat_prior=1.0,
                  relrates_prior=0, relrates_weight=0,
                  algorithm="viterbi", random_state=None,
@@ -1341,9 +1341,19 @@ class MarkedPoissonHMM(_BaseHMM):
         self.clusters = dict()
         self.clusters['n_clusters'] = n_clusters
         self.clusters['n_cluster_dims'] = n_cluster_dims
-        self.clusters['mu'] = mu
-        self.clusters['Sigma'] = Sigma
+        self.clusters['cluster_means'] = cluster_means
+        self.clusters['cluster_covars'] = cluster_covars
         self.clusters['covariance_type'] = covariance_type
+
+    @property
+    def covars_(self):
+        """Return covars as a full matrix."""
+        return fill_covars(self.clusters['cluster_covars'], self.clusters['covariance_type'],
+                           self.clusters['n_clusters'], self.clusters['n_cluster_dims'])
+
+    @covars_.setter
+    def covars_(self, covars):
+        self._covars_ = np.asarray(covars).copy()
 
     def _check(self):
         super(MarkedPoissonHMM, self)._check()
@@ -1351,15 +1361,22 @@ class MarkedPoissonHMM(_BaseHMM):
         self.relrates = np.asarray(self.relrates_)
         assert self.clusters['n_clusters'] == self.relrates_.shape[1]
 
-        assert self.clusters['mu'].shape[0] == self.clusters['n_clusters']
-        assert self.clusters['mu'].shape[1] == self.clusters['n_cluster_dims']
+        if self.clusters['covariance_type'] not in COVARIANCE_TYPES:
+            raise ValueError('covariance_type must be one of {}'
+                             .format(COVARIANCE_TYPES))
 
-        assert self.clusters['Sigma'].shape[0] == self.clusters['n_clusters']
-        assert self.clusters['Sigma'].shape[1] == self.clusters['n_cluster_dims']
-        assert self.clusters['Sigma'].shape[2] == self.clusters['n_cluster_dims']
+        _utils._validate_covars(self._covars_, self.clusters['covariance_type'],
+                                self.clusters['n_clusters'])
+
+        assert self.clusters['cluster_means'].shape[0] == self.clusters['n_clusters']
+        assert self.clusters['cluster_means'].shape[1] == self.clusters['n_cluster_dims']
+
+        assert self.covars_.shape[0] == self.clusters['n_clusters']
+        assert self.covars_.shape[1] == self.clusters['n_cluster_dims']
+        assert self.covars_.shape[2] == self.clusters['n_cluster_dims']
 
     def _compute_log_likelihood(self, obs):
-        return log_marked_poisson_density(obs, self.relrates_, self.n_clusters)
+        return log_marked_poisson_density(obs, self.relrates_, self.clusters['n_clusters']) # pass in number of samples to use for approximation
 
     def _generate_sample_from_state(self, state, random_state=None):
         raise NotImplementedError
@@ -1384,18 +1401,18 @@ class MarkedPoissonHMM(_BaseHMM):
                                   covariance_type=self.clusters['covariance_type'])
             gmm.fit(X)
 
-            mu = gmm.means_
-            Sigma = gmm.covariances_
+            # cluster_means = gmm.means_
+            # cluster_covars = gmm.covariances_
 
-            if len(Sigma.shape) < 3:
-                Sigma_ = np.zeros((self.clusters['n_clusters'], self.clusters['n_cluster_dims'], self.clusters['n_cluster_dims']))
-                for cc in range(self.clusters['n_clusters']):
-                    Sigma_[cc,:,:] = np.diag(Sigma[cc])
+            # if len(Sigma.shape) < 3:
+            #     Sigma_ = np.zeros((self.clusters['n_clusters'], self.clusters['n_cluster_dims'], self.clusters['n_cluster_dims']))
+            #     for cc in range(self.clusters['n_clusters']):
+            #         Sigma_[cc,:,:] = np.diag(Sigma[cc])
 
-                Sigma = Sigma_
+            #     Sigma = Sigma_
 
-            self.clusters['mu'] = mu
-            self.clusters['Sigma'] = Sigma
+            self.clusters['cluster_means'] = gmm.means_
+            self.clusters['cluster_covars'] = gmm.covariances_
 
         if 'r' in self.init_params or not hasattr(self, "relrates_"):
             raise NotImplementedError
@@ -1405,7 +1422,7 @@ class MarkedPoissonHMM(_BaseHMM):
     def _initialize_sufficient_statistics(self):
         stats = super(MarkedPoissonHMM, self)._initialize_sufficient_statistics()
         stats['post'] = np.zeros(self.n_components)
-        stats['numerator'] = np.zeros((self.n_components, self.self.clusters['n_clusters']))
+        stats['numerator'] = np.zeros((self.n_components, self.clusters['n_clusters']))
         return stats
 
     def _accumulate_sufficient_statistics(self, stats, obs, framelogprob,
@@ -1425,8 +1442,8 @@ class MarkedPoissonHMM(_BaseHMM):
             n_samples = len(obs)
             N = self.clusters['n_clusters']
             Z = self.n_components
-            mu = self.clusters['mu']
-            Sigma = self.clusters['Sigma']
+            cluster_means = self.clusters['cluster_means']
+            covars = self.covars_
 
             numerator = np.zeros((Z, N))
 
@@ -1441,7 +1458,7 @@ class MarkedPoissonHMM(_BaseHMM):
 
                     logF = np.zeros((N, K))
                     for nn in range(N):
-                        mvn = multivariate_normal(mean=mu[nn], cov=Sigma[nn])
+                        mvn = multivariate_normal(mean=cluster_means[nn], cov=covars[nn])
                         f = np.log(mvn.pdf(marks))
                         logF[nn,:] = f
 
