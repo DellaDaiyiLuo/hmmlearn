@@ -14,6 +14,7 @@ The :mod:`hmmlearn.hmm` module implements hidden Markov models.
 """
 
 import numpy as np
+import sys
 from scipy.special import logsumexp, digamma, polygamma
 from sklearn import cluster
 from sklearn.utils import check_random_state
@@ -1395,6 +1396,10 @@ class MarkedPoissonHMM(_BaseHMM):
             from scipy import linalg
             from sklearn import mixture
 
+            if self.verbose:
+                message = "Initializing cluster parameters with a Gaussian mixture model"
+                print(message, file=sys.stderr)
+
             flattened = []
             for mm in X:
                 for mmm in mm:
@@ -1402,7 +1407,8 @@ class MarkedPoissonHMM(_BaseHMM):
             flattened = np.array(flattened)
 
             gmm = mixture.GaussianMixture(n_components=self.n_clusters,
-                                  covariance_type=self.covariance_type)
+                                  covariance_type=self.covariance_type,
+                                  verbose=self.verbose)
             gmm.fit(flattened)
 
             self.cluster_means = gmm.means_
@@ -1410,9 +1416,17 @@ class MarkedPoissonHMM(_BaseHMM):
 
         if 'r' in self.init_params or not hasattr(self, "rate_"):
             # maybe do gamma-sampled normalized rates?
+            if self.verbose:
+                message = "Initializing cluster rates with a Gamma prior"
+                print(message, file=sys.stderr)
+
             r = np.random.gamma(1,1, size=(self.n_components, self.n_clusters))
             r = (r.T/np.sum(r, axis=1)).T
             self.rate_ = r
+
+        if self.verbose:
+            message = "Done\n"
+            print(message, file=sys.stderr)
 
     def _initialize_sufficient_statistics(self):
         stats = super(MarkedPoissonHMM, self)._initialize_sufficient_statistics()
