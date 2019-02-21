@@ -1326,7 +1326,7 @@ class MarkedPoissonHMM(_BaseHMM):
                  cluster_means=None, cluster_covars=None, covariance_type='diag',
                  min_rate=0, rate_mode='absolute',
                  startprob_prior=1.0, transmat_prior=1.0,
-                 relrates_prior=0, relrates_weight=0,
+                 rate_prior=0, rate_weight=0,
                  algorithm="viterbi", random_state=None,
                  n_iter=10, n_samples=1e6, tol=1e-2, verbose=False,
                  params="str", init_params="strc"):
@@ -1341,47 +1341,46 @@ class MarkedPoissonHMM(_BaseHMM):
 
         self.rate_mode = rate_mode
         self.min_rate = min_rate
-        self.relrates_prior = relrates_prior
-        self.relrates_weight = relrates_weight
+        self.rate_prior = rate_prior
+        self.rate_weight = rate_weight
         self.n_samples = int(n_samples)
-        self.clusters = dict()
-        self.clusters['n_clusters'] = n_clusters
-        self.clusters['cluster_means'] = cluster_means
-        self.clusters['cluster_covars'] = cluster_covars
-        self.clusters['covariance_type'] = covariance_type
+        self.n_clusters = n_clusters
+        self.cluster_means = cluster_means
+        self.cluster_covars = cluster_covars
+        self.covariance_type = covariance_type
 
     @property
     def covars_(self):
         """Return covars as a full matrix."""
-        return fill_covars(self.clusters['cluster_covars'], self.clusters['covariance_type'],
-                           self.clusters['n_clusters'], self.clusters['n_cluster_dims'])
+        return fill_covars(self.cluster_covars, self.covariance_type,
+                           self.n_clusters, self.cluster_dim)
 
     @covars_.setter
     def covars_(self, covars):
-        self.clusters['cluster_covars'] = np.asarray(covars).copy()
+        self.cluster_covars = np.asarray(covars).copy()
 
     def _check(self):
         super(MarkedPoissonHMM, self)._check()
 
-        self.relrates_ = np.asarray(self.relrates_)
-        assert self.clusters['n_clusters'] == self.relrates_.shape[1]
+        self.rate_ = np.asarray(self.rate_)
+        assert self.n_clusters == self.rate_.shape[1]
 
-        if self.clusters['covariance_type'] not in COVARIANCE_TYPES:
+        if self.covariance_type not in COVARIANCE_TYPES:
             raise ValueError('covariance_type must be one of {}'
                              .format(COVARIANCE_TYPES))
 
-        _utils._validate_covars(self.clusters['cluster_covars'], self.clusters['covariance_type'],
-                                self.clusters['n_clusters'])
+        _utils._validate_covars(self.cluster_covars, self.covariance_type,
+                                self.n_clusters)
 
-        assert self.clusters['cluster_means'].shape[0] == self.clusters['n_clusters']
-        self.clusters['n_cluster_dims'] = self.clusters['cluster_means'].shape[1]
+        assert self.cluster_means.shape[0] == self.n_clusters
+        self.cluster_dim = self.cluster_means.shape[1]
 
-        assert self.covars_.shape[0] == self.clusters['n_clusters']
-        assert self.covars_.shape[1] == self.clusters['n_cluster_dims']
-        assert self.covars_.shape[2] == self.clusters['n_cluster_dims']
+        assert self.covars_.shape[0] == self.n_clusters
+        assert self.covars_.shape[1] == self.cluster_dim
+        assert self.covars_.shape[2] == self.cluster_dim
 
     def _compute_log_likelihood(self, obs):
-        return log_marked_poisson_density(obs, self.relrates_, self.clusters, self.n_samples) # pass in number of samples to use for approximation
+        return log_marked_poisson_density(obs, self.rate_, self.cluster_means, self.cluster_covars, self.n_samples) # pass in number of samples to use for approximation
 
     def _generate_sample_from_state(self, state, random_state=None):
         raise NotImplementedError
@@ -1402,23 +1401,23 @@ class MarkedPoissonHMM(_BaseHMM):
                     flattened.append(mmm)
             flattened = np.array(flattened)
 
-            gmm = mixture.GaussianMixture(n_components=self.clusters['n_clusters'],
-                                  covariance_type=self.clusters['covariance_type'])
+            gmm = mixture.GaussianMixture(n_components=self.n_clusters,
+                                  covariance_type=self.covariance_type)
             gmm.fit(flattened)
 
-            self.clusters['cluster_means'] = gmm.means_
-            self.clusters['cluster_covars'] = gmm.covariances_
+            self.cluster_means = gmm.means_
+            self.cluster_covars = gmm.covariances_
 
-        if 'r' in self.init_params or not hasattr(self, "relrates_"):
+        if 'r' in self.init_params or not hasattr(self, "rate_"):
             # maybe do gamma-sampled normalized rates?
-            r = np.random.gamma(1,1, size=(self.n_components, self.clusters['n_clusters']))
+            r = np.random.gamma(1,1, size=(self.n_components, self.n_clusters))
             r = (r.T/np.sum(r, axis=1)).T
-            self.relrates_ = r
+            self.rate_ = r
 
     def _initialize_sufficient_statistics(self):
         stats = super(MarkedPoissonHMM, self)._initialize_sufficient_statistics()
         stats['post'] = np.zeros(self.n_components)
-        stats['numerator'] = np.zeros((self.n_components, self.clusters['n_clusters']))
+        stats['numerator'] = np.zeros((self.n_components, self.n_clusters))
         return stats
 
     def _accumulate_sufficient_statistics(self, stats, obs, framelogprob,
@@ -1436,14 +1435,14 @@ class MarkedPoissonHMM(_BaseHMM):
             # latent number of neurons.
 
             n_samples = len(obs)
-            N = self.clusters['n_clusters']
+            N = self.n_clusters
             Z = self.n_components
-            cluster_means = self.clusters['cluster_means']
+            cluster_means = self.cluster_means
             covars = self.covars_
 
             numerator = np.zeros((Z, N))
 
-            R = self.relrates_
+            R = self.rate_
 
             for zz in range(Z):
                 r = R[zz,:].squeeze()
@@ -1480,13 +1479,13 @@ class MarkedPoissonHMM(_BaseHMM):
     def _do_mstep(self, stats):
         super(MarkedPoissonHMM, self)._do_mstep(stats)
 
-        relrates_prior = self.relrates_prior
-        relrates_weight = self.relrates_weight
+        rate_prior = self.rate_prior
+        rate_weight = self.rate_weight
 
         denom = stats['post'][:, np.newaxis]
         if 'r' in self.params:
-            self.relrates_ = ((relrates_weight * relrates_prior + stats['numerator'])
-                           / (relrates_weight + denom))
-            self.relrates_ = np.where(self.relrates_ > 1e-3, self.relrates_, 1e-3)
+            self.rate_ = ((rate_weight * rate_prior + stats['numerator'])
+                           / (rate_weight + denom))
+            self.rate_ = np.where(self.rate_ > 1e-3, self.rate_, 1e-3)
             if self.rate_mode == 'relative':
-                self.relrates_ = (self.relrates_.T/np.sum(self.relrates_, axis=1)).T
+                self.rate_ = (self.rate_.T/np.sum(self.rate_, axis=1)).T

@@ -288,7 +288,7 @@ def eval_P_Y_given_ISR(*, marks, r, mu, Sigma, M):
 
     return logP
 
-def log_marked_poisson_density(X, rates, clusters, n_samples):
+def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_samples):
     """Compute the log probability under a multivariate Gaussian marked
     Poisson 'distribution'.
 
@@ -324,8 +324,8 @@ def log_marked_poisson_density(X, rates, clusters, n_samples):
         results = [pool.apply_async(eval_P_Y_given_ISR,
             kwds={'marks' : obs,
                   'r' : r,
-                  'mu': clusters['cluster_means'],
-                  'Sigma' : clusters['cluster_covars'],
+                  'mu': cluster_means,
+                  'Sigma' : cluster_covars,
                   'M' : n_samples}) for obs in X]
         results = [p.get() for p in results]
         lpr[:,zz] = results
