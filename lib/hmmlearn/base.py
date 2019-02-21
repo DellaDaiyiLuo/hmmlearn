@@ -202,6 +202,7 @@ class _BaseHMM(BaseEstimator):
         self.verbose = verbose
         self.monitor_ = ConvergenceMonitor(self.tol, self.n_iter, self.verbose)
         self.final_logprob = None
+        self.__is_clusterless = False
 
     def score_samples(self, X, lengths=None):
         """Compute the log probability under the model and compute posteriors.
@@ -231,7 +232,8 @@ class _BaseHMM(BaseEstimator):
         check_is_fitted(self, "startprob_")
         self._check()
 
-        X = check_array(X)
+        if not self.__is_clusterless:
+            X = check_array(X)
         n_samples = X.shape[0]
         logprob = 0
         posteriors = np.zeros((n_samples, self.n_components))
@@ -270,7 +272,8 @@ class _BaseHMM(BaseEstimator):
         check_is_fitted(self, "startprob_")
         self._check()
 
-        X = check_array(X)
+        if not self.__is_clusterless:
+            X = check_array(X)
         # XXX we can unroll forward pass for speed and memory efficiency.
         logprob = 0
         for i, j in iter_from_X_lengths(X, lengths):
@@ -332,7 +335,8 @@ class _BaseHMM(BaseEstimator):
             "map": self._decode_map
         }[algorithm]
 
-        # X = check_array(X)
+        if not self.__is_clusterless:
+            X = check_array(X)
         n_samples = X.shape[0]
         logprob = 0
         state_sequence = np.empty(n_samples, dtype=int)
@@ -448,7 +452,8 @@ class _BaseHMM(BaseEstimator):
         self : object
             Returns self.
         """
-        # X = check_array(X)
+        if not self.__is_clusterless:
+            X = check_array(X)
         self._init(X, lengths=lengths)
         self._check()
 

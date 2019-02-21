@@ -1337,6 +1337,8 @@ class MarkedPoissonHMM(_BaseHMM):
                           tol=tol, params=params, verbose=verbose,
                           init_params=init_params)
 
+        self._BaseHMM__is_clusterless = True
+
         self.rate_mode = rate_mode
         self.min_rate = min_rate
         self.relrates_prior = relrates_prior
