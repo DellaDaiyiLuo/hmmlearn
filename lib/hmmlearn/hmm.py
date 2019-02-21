@@ -1226,11 +1226,11 @@ class GammaHMM(_BaseHMM):
         if hasattr(self, "shapes_") and self.shapes_.shape != (self.n_components, self.n_features):
             raise ValueError("shapes_ must have shape (n_components, n_features) "
                              "--got {} but expected ({}, {})"
-                             .format(self.shapes_shape, self.n_components, self.n_features))
+                             .format(self.shapes_.shape, self.n_components, self.n_features))
         if hasattr(self, "scales_") and self.scales_.shape != (self.n_components, self.n_features):
             raise ValueError("scales_ must have shape (n_components, n_features) "
                              "--got {} but expected ({}, {})"
-                             .format(self.scales_shape, self.n_components, self.n_features))
+                             .format(self.scales_.shape, self.n_components, self.n_features))
 
 
     def _compute_log_likelihood(self, obs):
