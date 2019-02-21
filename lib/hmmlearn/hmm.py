@@ -1392,8 +1392,6 @@ class MarkedPoissonHMM(_BaseHMM):
         if 'c' in self.init_params:
             # do GMM here to estimate cluster means and covariances.
 
-            import itertools
-            from scipy import linalg
             from sklearn import mixture
 
             if self.verbose:
