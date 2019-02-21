@@ -3,6 +3,8 @@ from scipy import linalg
 from scipy.special import logsumexp, gammaln
 from scipy.stats import multivariate_normal
 
+MIN_LIKELIHOOD = 1e-300
+
 def log_multivariate_normal_density(X, means, covars, covariance_type='diag'):
     """Compute the log probability under a multivariate Gaussian distribution.
     Parameters
@@ -239,7 +241,9 @@ def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma):
 
     for nn in range(N):
         mvn = multivariate_normal(mean=mu[nn], cov=Sigma[nn])
-        f = np.log(mvn.pdf(marks))
+        f = np.atleast_1d(mvn.pdf(marks))
+        f[f < MIN_LIKELIHOOD] = MIN_LIKELIHOOD
+        f = np.log(f)
         logF[nn,:] = f
 
     ll = np.zeros(M)
