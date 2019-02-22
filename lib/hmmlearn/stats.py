@@ -253,6 +253,7 @@ def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma, rates):
         # poisson
         pois = poisson(rates[nn])
         p = np.atleast_1d(pois.logpmf(n_marks))
+        p[p < MIN_LOGLIKELIHOOD] = MIN_LOGLIKELIHOOD
         logP[nn,:] = p
 
     bins = np.arange(N+1)
@@ -330,7 +331,7 @@ def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_sample
     import psutil
 
     n_processes = psutil.cpu_count()
-    pool = mp.Pool(processes=n_processes)
+    # pool = mp.Pool(processes=n_processes)
 
     n_components, n_clusters = rates.shape
     n_obs = len(X)
@@ -338,13 +339,14 @@ def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_sample
 
     for zz in range(n_components):
         r = rates[zz,:].squeeze()
-        results = [pool.apply_async(eval_P_Y_given_ISR,
-            kwds={'marks' : obs,
-                  'rates' : r,
-                  'mu': cluster_means,
-                  'Sigma' : cluster_covars,
-                  'M' : n_samples}) for obs in X]
-        results = [p.get() for p in results]
+        with mp.Pool(processes=n_processes) as pool:
+            results = [pool.apply_async(eval_P_Y_given_ISR,
+                kwds={'marks' : obs,
+                    'rates' : r,
+                    'mu': cluster_means,
+                    'Sigma' : cluster_covars,
+                    'M' : n_samples}) for obs in X]
+            results = [p.get() for p in results]
         lpr[:,zz] = results
 
     lprs = np.sum(lpr, axis=1)
