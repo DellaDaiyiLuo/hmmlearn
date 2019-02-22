@@ -1,9 +1,10 @@
 import numpy as np
 from scipy import linalg
 from scipy.special import logsumexp, gammaln
-from scipy.stats import multivariate_normal
+from scipy.stats import multivariate_normal, poisson
 
 MIN_LIKELIHOOD = 1e-300
+MIN_LOGLIKELIHOOD = -700
 
 def log_multivariate_normal_density(X, means, covars, covariance_type='diag'):
     """Compute the log probability under a multivariate Gaussian distribution.
@@ -209,7 +210,7 @@ def sample_IKR(r, *, K=None, N=None, M=None, mode='id'):
 
     return ikr
 
-def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma):
+def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma, rates):
     """
     Compute P(Y=marks | I^K), where I^K ~ rates.
 
@@ -229,6 +230,8 @@ def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma):
         D-dimensional means for each of the N neurons.
     Sigma : array-like, with shape (N, D, D)
         D-by-D-dimensional covariances for each of the N neurons.
+    rates : array-like, with shape (N,)
+        Rates for each of the neurons.
 
     Returns
     -------
@@ -237,23 +240,32 @@ def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma):
     N = len(mu)
     M, K = ikr.shape
 
-    logF = np.zeros((N, K))
+    logF = np.zeros((N, K)) # precomputed multivariate normal probs
+    logP = np.zeros((N, K)) # precomputed Poisson probs
 
+    n_marks = np.arange(K+1)
     for nn in range(N):
+        # multivariate normal
         mvn = multivariate_normal(mean=mu[nn], cov=Sigma[nn])
-        f = np.atleast_1d(mvn.pdf(marks))
-        f[f < MIN_LIKELIHOOD] = MIN_LIKELIHOOD
-        f = np.log(f)
+        f = np.atleast_1d(mvn.logpdf(marks))
+        f[f < MIN_LOGLIKELIHOOD] = MIN_LOGLIKELIHOOD
         logF[nn,:] = f
+        # poisson
+        pois = poisson(rates[nn])
+        p = np.atleast_1d(pois.logpmf(n_marks))
+        logP[nn,:] = p
 
+    bins = np.arange(N+1)
     ll = np.zeros(M)
     krange = np.arange(K)
+    nrange = np.arange(N)
     for ii in range(M):
-        ll[ii] = np.sum(logF[ikr[ii], krange])
+        Vii = np.histogram(ikr[ii], bins=bins)[0]
+        ll[ii] = np.sum(logF[ikr[ii], krange]) + np.sum( logP[nrange, Vii] )
 
     return ll
 
-def eval_P_Y_given_ISR(*, marks, r, mu, Sigma, M):
+def eval_P_Y_given_ISR(*, marks, rates, mu, Sigma, M):
     """
     Appriximate P(Y=marks | r_t^{(j)}) by sampling I^K|R.
 
@@ -264,7 +276,7 @@ def eval_P_Y_given_ISR(*, marks, r, mu, Sigma, M):
     marks : array-like, with shape (K, D)
         Observed marks, with shape (K, D), where D is the dimensionality
         of the mark space, and K is the number of observed marks.
-    r : array-like
+    rates : array-like
         Relative rates of shape (N,) for current time window, and state
     mu : array-like, with shape (N, D)
         D-dimensional means for each of the N neurons.
@@ -278,7 +290,7 @@ def eval_P_Y_given_ISR(*, marks, r, mu, Sigma, M):
     """
     K = len(marks)
 
-    ikr = sample_IKR(r=r,
+    ikr = sample_IKR(r=rates,
                     K=K,
                     M=M,
                     mode='id')
@@ -286,7 +298,8 @@ def eval_P_Y_given_ISR(*, marks, r, mu, Sigma, M):
     ll = eval_mark_loglikelihoods(marks=marks,
                                 ikr=ikr,
                                 mu=mu,
-                                Sigma=Sigma)
+                                Sigma=Sigma,
+                                rates=rates)
 
     logP = logsumexp(ll) - np.log(M)
 
@@ -327,7 +340,7 @@ def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_sample
         r = rates[zz,:].squeeze()
         results = [pool.apply_async(eval_P_Y_given_ISR,
             kwds={'marks' : obs,
-                  'r' : r,
+                  'rates' : r,
                   'mu': cluster_means,
                   'Sigma' : cluster_covars,
                   'M' : n_samples}) for obs in X]

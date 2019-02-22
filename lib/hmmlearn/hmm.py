@@ -37,6 +37,7 @@ __all__ = ["GMMHMM",
 
 COVARIANCE_TYPES = frozenset(("spherical", "diag", "full", "tied"))
 MIN_LIKELIHOOD = 1e-300
+MIN_LOGLIKELIHOOD = -700
 
 class GaussianHMM(_BaseHMM):
     """Hidden Markov Model with Gaussian emissions.
@@ -1467,9 +1468,8 @@ class MarkedPoissonHMM(_BaseHMM):
                         logF = np.zeros((N, K))
                         for nn in range(N):
                             mvn = multivariate_normal(mean=cluster_means[nn], cov=covars[nn])
-                            f = np.atleast_1d(mvn.pdf(marks))
-                            f[f < MIN_LIKELIHOOD] = MIN_LIKELIHOOD
-                            f = np.log(f)
+                            f = np.atleast_1d(mvn.logpdf(marks))
+                            f[f < MIN_LOGLIKELIHOOD] = MIN_LOGLIKELIHOOD
                             logF[nn,:] = f
 
                         den = logsumexp((logF.T + np.log(r)).T , axis=0)
