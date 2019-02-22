@@ -241,7 +241,7 @@ def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma, rates):
     M, K = ikr.shape
 
     logF = np.zeros((N, K)) # precomputed multivariate normal probs
-    logP = np.zeros((N, K)) # precomputed Poisson probs
+    logP = np.zeros((N, K+1)) # precomputed Poisson probs
 
     n_marks = np.arange(K+1)
     for nn in range(N):
