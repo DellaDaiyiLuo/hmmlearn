@@ -158,7 +158,7 @@ def log_multivariate_gamma_density(X, shape, scale):
     lpr = term1 - term2 + term3 - term4
     return lpr
 
-def sample_IKR(r, *, K=None, N=None, M=None, mode='id'):
+def sample_IKR(rates, *, n_marks=None, n_clusters=None, n_samples=None, mode='id'):
     """Sample I^K|R.
 
     Note that 1^K|R is called I^K|R because we cannot have variables
@@ -166,107 +166,106 @@ def sample_IKR(r, *, K=None, N=None, M=None, mode='id'):
 
     Parameters
     ----------
-    r : array-like
-        Relative rates of shape (N,) for current time window, and state
-    K : int, optional
+    rates : array-like
+        Relative rates of shape (n_clusters,) for current time window, and state
+    n_marks : int, optional
         Number of events to sample, default is one.
-    N : int, optional
+    n_clusters : int, optional
         Number of neurons, if not specified, will be obtained from R.
-    M : int, optional
-        Number of length-K samples to generate. Default is one.
+    n_samples : int, optional
+        Number of length-n_marks samples to generate. Default is one.
     mode : str, optional
         String specifying output mode. Default is 'id'.
         Alternative is 'ek', which returns the sequence of vectors.
 
     Returns
     -------
-    ikr : samples with shape (M, K) if mode=='id', and with shape (M, N, K)
-        if mode=='ek'
+    ikr : samples with shape (n_samples, n_marks) if mode=='id', and with
+        shape (n_samples, n_clusters, n_marks) if mode=='ek'
 
     Example
     -------
     >>> r = [0.1, 0.4, 0.2]
-    >>> ikr = sample_IKR(r=r, K=30, M=20, mode='id')
+    >>> ikr = sample_IKR(rates=r, n_marks=30, n_samples=20, mode='id')
 
     """
+    if n_marks is None:
+        n_marks = 1
+    if n_samples is None:
+        n_samples = 1
+    if n_clusters is None:
+        n_clusters = len(rates)
 
-    if K is None:
-        K = 1
-    if M is None:
-        M = 1
-    if N is None:
-        N = len(r)
-
-    p = r / np.sum(r) # only want to do this once!
+    p = rates / np.sum(rates)
 
     if mode == 'id':
-        ikr = np.random.choice(a=N, size=K*M, p=p )
-        ikr = np.reshape(ikr, (M, K))
+        ikr = np.random.choice(a=n_clusters, size=n_marks*n_samples, p=p )
+        ikr = np.reshape(ikr, (n_samples, n_marks))
     elif mode == 'ek':
-        ikr = np.random.multinomial(n=1, pvals=p, size=K*M)
-        ikr = np.reshape(ikr, (K, M, N)).transpose([1,2,0])
+        ikr = np.random.multinomial(n=1, pvals=p, size=n_marks*n_samples)
+        ikr = np.reshape(ikr, (n_marks, n_samples, n_clusters)).transpose([1,2,0])
     else:
         raise ValueError("mode '{}' not understood.".format(mode))
 
     return ikr
 
-def eval_mark_loglikelihoods(*, marks, ikr, mu, Sigma, rates):
+def eval_mark_loglikelihoods(*, marks, ikr, cluster_means, cluster_covars, rates):
     """
     Compute P(Y=marks | I^K), where I^K ~ rates.
 
-    Strategy: first pre-compute the NxK likelihood of observing
+    Strategy: first pre-compute the n_clusters x n_marks likelihood of observing
     each mark from every neuron. Then use this matrix to compute
     the rest.
 
     Parameters
     ----------
-    marks : array-like, with shape (K, D)
-        Observed marks, with shape (K, D), where D is the dimensionality
-        of the mark space, and K is the number of observed marks.
+    marks : array-like, with shape (n_marks, D)
+        Observed marks, with shape (n_marks, D), where D is the dimensionality
+        of the mark space, and n_marks is the number of observed marks.
 
-    ikr : array-like, with shape (M, K)
+    ikr : array-like, with shape (n_samples, n_marks)
         Sampled neuron IDs for each sample, and each mark.
-    mu : array-like, with shape (N, D)
-        D-dimensional means for each of the N neurons.
-    Sigma : array-like, with shape (N, D, D)
-        D-by-D-dimensional covariances for each of the N neurons.
-    rates : array-like, with shape (N,)
+    cluster_means : array-like, with shape (n_clusters, D)
+        D-dimensional means for each of the n_clusters neurons.
+    cluster_covars : array-like, with shape (n_clusters, D, D)
+        D-by-D-dimensional covariances for each of the n_clusters neurons.
+    rates : array-like, with shape (n_clusters,)
         Rates for each of the neurons.
 
     Returns
     -------
-    ll : log likelihoods for each sample. Shape (M,)
+    ll : log likelihoods for each sample. Shape (n_samples,)
     """
-    N = len(mu)
-    M, K = ikr.shape
+    n_clusters = len(cluster_means)
+    n_samples, n_marks = ikr.shape
 
-    logF = np.zeros((N, K)) # precomputed multivariate normal probs
-    logP = np.zeros((N, K+1)) # precomputed Poisson probs
+    logF = np.zeros((n_clusters, n_marks)) # precomputed multivariate normal probs
+    logP = np.zeros((n_clusters, n_marks+1)) # precomputed Poisson probs
 
-    n_marks = np.arange(K+1)
-    for nn in range(N):
+    mark_range = np.arange(n_marks+1)
+    for nn in range(n_clusters):
         # multivariate normal
-        mvn = multivariate_normal(mean=mu[nn], cov=Sigma[nn])
+        mvn = multivariate_normal(mean=cluster_means[nn], cov=cluster_covars[nn])
         f = np.atleast_1d(mvn.logpdf(marks))
         f[f < MIN_LOGLIKELIHOOD] = MIN_LOGLIKELIHOOD
         logF[nn,:] = f
         # poisson
         pois = poisson(rates[nn])
-        p = np.atleast_1d(pois.logpmf(n_marks))
+        p = np.atleast_1d(pois.logpmf(mark_range))
         p[p < MIN_LOGLIKELIHOOD] = MIN_LOGLIKELIHOOD
         logP[nn,:] = p
 
-    bins = np.arange(N+1)
-    ll = np.zeros(M)
-    krange = np.arange(K)
-    nrange = np.arange(N)
-    for ii in range(M):
+    bins = np.arange(n_clusters+1)
+    ll = np.zeros(n_samples)
+    krange = np.arange(n_marks)
+    nrange = np.arange(n_clusters)
+    for ii in range(n_samples):
         Vii = np.histogram(ikr[ii], bins=bins)[0]
         ll[ii] = np.sum(logF[ikr[ii], krange]) + np.sum( logP[nrange, Vii] )
 
     return ll
 
-def eval_P_Y_given_ISR(*, marks, rates, mu, Sigma, M):
+def eval_P_Y_given_ISR(*, marks, rates, cluster_means, cluster_covars, n_samples=None, stype='unbiased'):
     """
     Appriximate P(Y=marks | r_t^{(j)}) by sampling I^K|R.
 
@@ -274,51 +273,92 @@ def eval_P_Y_given_ISR(*, marks, rates, mu, Sigma, M):
 
     Parameters
     ----------
-    marks : array-like, with shape (K, D)
-        Observed marks, with shape (K, D), where D is the dimensionality
-        of the mark space, and K is the number of observed marks.
+    marks : array-like, with shape (n_marks, D)
+        Observed marks, with shape (n_marks, D), where D is the dimensionality
+        of the mark space, and n_marks is the number of observed marks.
     rates : array-like
-        Relative rates of shape (N,) for current time window, and state
-    mu : array-like, with shape (N, D)
-        D-dimensional means for each of the N neurons.
-    Sigma : array-like, with shape (N, D, D)
-        D-by-D-dimensional covariances for each of the N neurons.
+        Relative rates of shape (n_clusters,) for current time window, and state
+    cluster_means : array-like, with shape (n_clusters, D)
+        D-dimensional means for each of the n_clusters neurons.
+    cluster_covars : array-like, with shape (n_clusters, D, D)
+        D-by-D-dimensional covariances for each of the n_clusters neurons.
+    n_samples : int, optional
+        Number of samples to use to approximate P(Y | S, r). Ignored
+        if stype == 'no-ml'. Default is 15000.
+    stype : str, optional
+        One of ['unbiased', 'biased', 'no-ml'].
+        'biased' samples in proportion to mark and rate probabilities.
+        'no-ml' does not sample, but only returns the maximum likely
+        IKR, based on the cluster params. Default is 'unbiased'.
 
     Returns
     -------
     logP : log probability of observing sequence of marks
 
     """
-    K = len(marks)
+    n_marks = len(marks)
 
-    ikr = sample_IKR(r=rates,
-                    K=K,
-                    M=M,
-                    mode='id')
+    if n_samples is None:
+        n_samples = 15000
+
+    n_clusters = len(cluster_means)
+
+    if stype == 'unbiased':
+        ikr = sample_IKR(rates=rates,
+                     n_marks=n_marks,
+                     n_samples=n_samples,
+                     mode='id')
+    elif stype == 'biased':
+        ikr = None
+        raise NotImplementedError
+    elif stype == 'no-ml':
+        logF = np.zeros((n_clusters, n_marks)) # precomputed multivariate normal probs
+        for nn in range(n_clusters):
+            # multivariate normal
+            mvn = multivariate_normal(mean=cluster_means[nn], cov=cluster_covars[nn])
+            f = np.atleast_1d(mvn.logpdf(marks))
+            f[f < MIN_LOGLIKELIHOOD] = MIN_LOGLIKELIHOOD
+            logF[nn,:] = f
+        ikr = np.atleast_2d(np.argmax(logF, axis=0).astype(int))
+    else:
+        ikr = None
+        raise ValueError("Unknown sampling type. Got '{}', expected one of []'unbiased', 'biased', 'no-ml'].".format(stype))
 
     ll = eval_mark_loglikelihoods(marks=marks,
                                 ikr=ikr,
-                                mu=mu,
-                                Sigma=Sigma,
+                                cluster_means=cluster_means,
+                                cluster_covars=cluster_covars,
                                 rates=rates)
 
-    logP = logsumexp(ll) - np.log(M)
+    logP = logsumexp(ll) - np.log(n_samples)
 
     return logP
 
-def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_samples):
+def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_samples, stype='unbiased'):
     """Compute the log probability under a multivariate Gaussian marked
     Poisson 'distribution'.
 
     Parameters
     ----------
     X : array_like, shape (n_obs, )
-        List of mark features. Each element is a (K, D) array, where K is the
+        List of mark features. Each element is a (n_marks, D) array, where n_marks is the
         number of marks in the particular observation, and D is the mark feature
         dimension.
     rates : array_like, shape (n_components, n_clusters)
         List of n_clusters-dimensional relative rate vectors for n_components.
         Each row corresponds to a single rate vector.
+    cluster_means : array-like, with shape (n_clusters, D)
+        D-dimensional means for each of the n_clusters neurons.
+    cluster_covars : array-like, with shape (n_clusters, D, D)
+        D-by-D-dimensional covariances for each of the n_clusters neurons.
+    n_samples : int, optional
+        Number of samples to use to approximate P(Y | S, r). Ignored
+        if stype == 'no-ml'. Default is 15000.
+    stype : str, optional
+        One of ['unbiased', 'biased', 'no-ml'].
+        'biased' samples in proportion to mark and rate probabilities.
+        'no-ml' does not sample, but only returns the maximum likely
+        IKR, based on the cluster params. Default is 'unbiased'.
 
     Returns
     -------
@@ -331,7 +371,6 @@ def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_sample
     import psutil
 
     n_processes = psutil.cpu_count()
-    # pool = mp.Pool(processes=n_processes)
 
     n_components, n_clusters = rates.shape
     n_obs = len(X)
@@ -343,9 +382,10 @@ def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_sample
             results = [pool.apply_async(eval_P_Y_given_ISR,
                 kwds={'marks' : obs,
                     'rates' : r,
-                    'mu': cluster_means,
-                    'Sigma' : cluster_covars,
-                    'M' : n_samples}) for obs in X]
+                    'cluster_means': cluster_means,
+                    'cluster_covars' : cluster_covars,
+                    'n_samples' : n_samples,
+                    'stype' : stype}) for obs in X]
             results = [p.get() for p in results]
         lpr[:,zz] = results
 

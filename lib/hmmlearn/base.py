@@ -110,6 +110,31 @@ class ConvergenceMonitor(object):
         self.history.append(logprob)
         self.iter += 1
 
+    def report_decreasing_logprob(self, logprob):
+        """Reports convergence to :data:`sys.stderr`.
+
+        The output consists of three columns: iteration number, log
+        probability of the data at the current iteration and convergence
+        rate.  At the first iteration convergence rate is unknown and
+        is thus denoted by NaN.
+
+        Parameters
+        ----------
+        logprob : float
+            The log probability of the data as computed by EM algorithm
+            in the current iteration.
+        """
+        if self.verbose:
+            delta = logprob - self.history[-1] if self.history else np.nan
+            message = self._template.format(
+                iter=self.iter + 1, logprob=logprob, delta=delta)
+            print(message, file=sys.stderr)
+            message = "The log probability of the last iteration decreased; reverting to previous state"
+            print(message, file=sys.stderr)
+
+        self.history.append(logprob)
+        self.iter += 1
+
     @property
     def converged(self):
         """``True`` if the EM algorithm converged and ``False`` otherwise."""
@@ -458,6 +483,7 @@ class _BaseHMM(BaseEstimator):
         self._check()
 
         self.monitor_._reset()
+        best_logprob = -np.inf
         for iter in range(self.n_iter):
             stats = self._initialize_sufficient_statistics()
             curr_logprob = 0
@@ -476,12 +502,16 @@ class _BaseHMM(BaseEstimator):
 
             # XXX must be before convergence check, because otherwise
             #     there won't be any updates for the case ``n_iter=1``.
-            self._do_mstep(stats)
+            if curr_logprob > best_logprob:
+                best_logprob = curr_logprob
+                self._do_mstep(stats)
 
-            self.monitor_.report(curr_logprob)
+                self.monitor_.report(curr_logprob)
+            else:
+                self.monitor_.report_decreasing_logprob(curr_logprob)
             if self.monitor_.converged:
-                self.final_logprob = curr_logprob
-                break
+                    self.final_logprob = curr_logprob
+                    break
 
         return self
 

@@ -1295,6 +1295,13 @@ class MarkedPoissonHMM(_BaseHMM):
         Initial state occupation prior distribution.
     transmat_prior : array, shape (n_components, n_components)
         Matrix of prior transition probabilities between states.
+    COMPLETE ME
+    stype : str, optional
+        One of ['unbiased', 'biased', 'no-ml'].
+        'biased' samples in proportion to mark and rate probabilities.
+        'no-ml' does not sample, but only returns the maximum likely
+        IKR, based on the cluster params. Default is 'unbiased'.
+
 
     Attributes
     ----------
@@ -1308,9 +1315,10 @@ class MarkedPoissonHMM(_BaseHMM):
         Matrix of transition probabilities between states.
     startprob_ : array, shape (n_components, )
         Initial state occupation distribution.
-    relrates_ : array, shape (n_components, n_clusters)
+    rates_ : array, shape (n_components, n_clusters)
         Relative rate parameters for each state. Relative rates
         over n_clusters, so that each row sums to one.
+
 
     Notes
     -----
@@ -1331,7 +1339,7 @@ class MarkedPoissonHMM(_BaseHMM):
                  rate_prior=0, rate_weight=0,
                  algorithm="viterbi", random_state=None,
                  n_iter=10, n_samples=1e6, tol=1e-2, verbose=False,
-                 params="str", init_params="strc"):
+                 params="str", init_params="strc", stype='unbiased'):
         _BaseHMM.__init__(self, n_components,
                           startprob_prior=startprob_prior,
                           transmat_prior=transmat_prior, algorithm=algorithm,
@@ -1350,6 +1358,7 @@ class MarkedPoissonHMM(_BaseHMM):
         self.cluster_means = cluster_means
         self.cluster_covars = cluster_covars
         self.covariance_type = covariance_type
+        self.stype = stype
 
     @property
     def covars_(self):
@@ -1382,7 +1391,12 @@ class MarkedPoissonHMM(_BaseHMM):
         assert self.covars_.shape[2] == self.cluster_dim
 
     def _compute_log_likelihood(self, obs):
-        return log_marked_poisson_density(obs, self.rate_, self.cluster_means, self.cluster_covars, self.n_samples) # pass in number of samples to use for approximation
+        return log_marked_poisson_density(obs,
+                                          self.rate_,
+                                          self.cluster_means,
+                                          self.cluster_covars,
+                                          self.n_samples,
+                                          self.stype)
 
     def _generate_sample_from_state(self, state, random_state=None):
         raise NotImplementedError
