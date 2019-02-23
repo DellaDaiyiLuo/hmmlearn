@@ -330,7 +330,11 @@ def eval_P_Y_given_ISR(*, marks, rates, cluster_means, cluster_covars, n_samples
                                 cluster_covars=cluster_covars,
                                 rates=rates)
 
-    logP = logsumexp(ll) - np.log(n_samples)
+    logP = logsumexp(ll)
+
+    # if we used sampling, we need to normalize by number of samples:
+    if stype != 'no-ml':
+        logP -= np.log(n_samples)
 
     return logP
 
