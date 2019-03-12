@@ -109,61 +109,7 @@ def log_multivariate_poisson_density(X, means) :
     #print("lpr has shape {}".format(lpr.shape))
     return lpr
 
-<<<<<<< HEAD
-def log_multivariate_gamma_density(X, shape, scale):
-
-    """"
-
-    Parameters
-    ==========
-    X : np.ndarray, shape (n_samples, n_features)
-        Input data
-    shape : np.ndarray, shape (n_components, n_features)
-        The shape parameters of the Gamma distribution,
-        also known as k
-    scale : np.ndarray, shape (n_components, n_features)
-        The scale parameter of the Gamma distribution,
-        also known as theta
-
-    Returns
-    =======
-    lpr : ndarray, shape (n_samples, n_components)
-        Log likelihood of the data, for each component
-        (latent state) given the parameters
-    """
-
-    # The log likelihood is given by
-    # log L(alpha, beta|X) =
-    #     alpha*log(beta) - log(gamma(alpha)) + (alpha - 1)*log(X) - beta*X
-    # For X with shape (1, n_features), and parameters with
-    # shape (n_components, n_features), this results in an output of shape
-    # (n_components, n_features). Assuming each feature is independent of
-    # the others, we sum the output array across all features (equivalent to
-    # multiplying probabilities in the non-log domain) to obtain an output
-    # of shape (n_components, ). We then reshape it to be (1, n_components).
-    # If X contains multiple samples, this strategy generalizes; the output
-    # will then have shape (n_samples, n_components)
-
-    alpha = shape
-    beta = 1/scale
-    alpha = np.where(alpha > 1e-3, alpha, 1e-3)
-    beta = np.where(beta > 1e-3, beta, 1e-3)
-
-    assert alpha.shape == beta.shape, "Alpha and beta have mismatched dimensions"
-
-    # Break up log likelihood calculation into terms
-    term1 = (alpha*np.log(beta)).sum(axis=1, keepdims=True).T
-    term2 = gammaln(alpha).sum(axis=1, keepdims=True).T
-    term3 = np.dot(np.log(X), (alpha - 1).T)
-    term4 = np.dot(X, beta.T)
-
-    lpr = term1 - term2 + term3 - term4
-    return lpr
-
-def sample_IKR(rates, *, n_marks=None, n_clusters=None, n_samples=None, mode='id', random_state=None):
-=======
 def sample_IKR(rates, *, n_marks=None, n_clusters=None, n_samples=None, mode='id'):
->>>>>>> 28bdc096370c7fa9e6a5c31cca8fde69965ae9fa
     """Sample I^K|R.
 
     Note that 1^K|R is called I^K|R because we cannot have variables
