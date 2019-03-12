@@ -2,6 +2,7 @@ import numpy as np
 from scipy import linalg
 from scipy.special import logsumexp, gammaln
 from scipy.stats import multivariate_normal, poisson
+from sklearn.utils import check_random_state
 
 MIN_LIKELIHOOD = 1e-300
 MIN_LOGLIKELIHOOD = -700
@@ -158,7 +159,7 @@ def log_multivariate_gamma_density(X, shape, scale):
     lpr = term1 - term2 + term3 - term4
     return lpr
 
-def sample_IKR(rates, *, n_marks=None, n_clusters=None, n_samples=None, mode='id'):
+def sample_IKR(rates, *, n_marks=None, n_clusters=None, n_samples=None, mode='id', random_state=None):
     """Sample I^K|R.
 
     Note that 1^K|R is called I^K|R because we cannot have variables
@@ -198,11 +199,12 @@ def sample_IKR(rates, *, n_marks=None, n_clusters=None, n_samples=None, mode='id
 
     p = rates / np.sum(rates)
 
+    rng = check_random_state(random_state)
     if mode == 'id':
-        ikr = np.random.choice(a=n_clusters, size=n_marks*n_samples, p=p )
+        ikr = rng.choice(a=n_clusters, size=n_marks*n_samples, p=p )
         ikr = np.reshape(ikr, (n_samples, n_marks))
     elif mode == 'ek':
-        ikr = np.random.multinomial(n=1, pvals=p, size=n_marks*n_samples)
+        ikr = rng.multinomial(n=1, pvals=p, size=n_marks*n_samples)
         ikr = np.reshape(ikr, (n_marks, n_samples, n_clusters)).transpose([1,2,0])
     else:
         raise ValueError("mode '{}' not understood.".format(mode))
@@ -265,7 +267,7 @@ def eval_mark_loglikelihoods(*, marks, ikr, cluster_means, cluster_covars, rates
 
     return ll
 
-def eval_P_Y_given_ISR(*, marks, rates, cluster_means, cluster_covars, n_samples=None, stype='unbiased'):
+def eval_P_Y_given_ISR(*, marks, rates, cluster_means, cluster_covars, n_samples=None, stype='unbiased', random_state=None):
     """
     Appriximate P(Y=marks | r_t^{(j)}) by sampling I^K|R.
 
@@ -307,7 +309,8 @@ def eval_P_Y_given_ISR(*, marks, rates, cluster_means, cluster_covars, n_samples
         ikr = sample_IKR(rates=rates,
                      n_marks=n_marks,
                      n_samples=n_samples,
-                     mode='id')
+                     mode='id',
+                     random_state=random_state)
     elif stype == 'biased':
         ikr = None
         raise NotImplementedError
@@ -338,7 +341,7 @@ def eval_P_Y_given_ISR(*, marks, rates, cluster_means, cluster_covars, n_samples
 
     return logP
 
-def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_samples, stype='unbiased'):
+def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_samples, stype='unbiased', random_state=None):
     """Compute the log probability under a multivariate Gaussian marked
     Poisson 'distribution'.
 
@@ -389,7 +392,8 @@ def log_marked_poisson_density(X, rates, cluster_means, cluster_covars, n_sample
                     'cluster_means': cluster_means,
                     'cluster_covars' : cluster_covars,
                     'n_samples' : n_samples,
-                    'stype' : stype}) for obs in X]
+                    'stype' : stype,
+                    'random_state': random_state}) for obs in X]
             results = [p.get() for p in results]
         lpr[:,zz] = results
 

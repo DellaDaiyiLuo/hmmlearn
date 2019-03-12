@@ -1396,7 +1396,8 @@ class MarkedPoissonHMM(_BaseHMM):
                                           self.cluster_means,
                                           self.cluster_covars,
                                           self.n_samples,
-                                          self.stype)
+                                          self.stype,
+                                          self.random_state)
 
     def _generate_sample_from_state(self, state, random_state=None):
         raise NotImplementedError
@@ -1421,7 +1422,7 @@ class MarkedPoissonHMM(_BaseHMM):
 
             gmm = mixture.GaussianMixture(n_components=self.n_clusters,
                                   covariance_type=self.covariance_type,
-                                  verbose=self.verbose)
+                                  verbose=self.verbose, random_state=self.random_state)
             gmm.fit(flattened)
 
             self.cluster_means = gmm.means_
@@ -1433,7 +1434,8 @@ class MarkedPoissonHMM(_BaseHMM):
                 message = "Initializing cluster rates with a Gamma prior"
                 print(message, file=sys.stderr)
 
-            r = np.random.gamma(1,1, size=(self.n_components, self.n_clusters))
+            rng = check_random_state(self.random_state)
+            r = rng.gamma(1,1, size=(self.n_components, self.n_clusters))
             r = (r.T/np.sum(r, axis=1)).T
             self.rate_ = r
 
