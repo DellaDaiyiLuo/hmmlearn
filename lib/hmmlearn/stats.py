@@ -109,7 +109,7 @@ def log_multivariate_poisson_density(X, means) :
     #print("lpr has shape {}".format(lpr.shape))
     return lpr
 
-def sample_IKR(rates, *, n_marks=None, n_clusters=None, n_samples=None, mode='id'):
+def sample_IKR(rates, *, n_marks=None, n_clusters=None, n_samples=None, mode='id', random_state=None):
     """Sample I^K|R.
 
     Note that 1^K|R is called I^K|R because we cannot have variables
