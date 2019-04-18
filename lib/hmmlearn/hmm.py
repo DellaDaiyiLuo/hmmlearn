@@ -23,7 +23,8 @@ from scipy.stats import multivariate_normal
 from . import _utils
 from .stats import (log_multivariate_normal_density,
                     log_multivariate_poisson_density,
-                    log_marked_poisson_density)
+                    log_marked_poisson_density,
+                    mp_log_marked_poisson_density)
 from .base import _BaseHMM
 from .utils import iter_from_X_lengths, normalize, fill_covars
 
@@ -31,7 +32,8 @@ __all__ = ["GMMHMM",
            "GaussianHMM",
            "MultinomialHMM",
            "PoissonHMM",
-           "MarkedPoissonHMM"]
+           "MarkedPoissonHMM",
+           "MultiprobeMarkedPoissonHMM"]
 
 COVARIANCE_TYPES = frozenset(("spherical", "diag", "full", "tied"))
 MIN_LIKELIHOOD = 1e-300
@@ -1176,6 +1178,13 @@ class MarkedPoissonHMM(_BaseHMM):
     by marks = np.array(n_samples*[None]), and then setting each
     element accordingly.
 
+    LIMITATIONS
+    -----------
+    In its current form, this class only supports marks from a single probe.
+    Neurons/units/clusters from different probes are assumed to be independent,
+    so that the evaluation could almost be independent as well, but the
+    underlying states are shared, so this class needs to be reworked/extended.
+
     Examples
     --------
     """
@@ -1187,7 +1196,7 @@ class MarkedPoissonHMM(_BaseHMM):
                  rate_prior=0, rate_weight=0,
                  algorithm="viterbi", random_state=None,
                  n_iter=10, n_samples=1e6, tol=1e-2, verbose=False,
-                 params="str", init_params="strc", stype='unbiased'):
+                 params="str", init_params="strc", stype='unbiased', reorder=False):
         _BaseHMM.__init__(self, n_components,
                           startprob_prior=startprob_prior,
                           transmat_prior=transmat_prior, algorithm=algorithm,
@@ -1207,6 +1216,7 @@ class MarkedPoissonHMM(_BaseHMM):
         self.cluster_covars = cluster_covars
         self.covariance_type = covariance_type
         self.stype = stype
+        self.reorder = reorder
 
     @property
     def covars_(self):
@@ -1245,7 +1255,8 @@ class MarkedPoissonHMM(_BaseHMM):
                                           self.cluster_covars,
                                           self.n_samples,
                                           self.stype,
-                                          self.random_state)
+                                          self.random_state,
+                                          self.reorder)
 
     def _generate_sample_from_state(self, state, random_state=None):
         raise NotImplementedError
@@ -1356,6 +1367,248 @@ class MarkedPoissonHMM(_BaseHMM):
 
     def _do_mstep(self, stats):
         super(MarkedPoissonHMM, self)._do_mstep(stats)
+
+        rate_prior = self.rate_prior
+        rate_weight = self.rate_weight
+
+        denom = stats['post'][:, np.newaxis]
+        if 'r' in self.params:
+            self.rate_ = ((rate_weight * rate_prior + stats['numerator'])
+                           / (rate_weight + denom))
+            self.rate_ = np.where(self.rate_ > 1e-3, self.rate_, 1e-3)
+            if self.rate_mode == 'relative':
+                self.rate_ = (self.rate_.T/np.sum(self.rate_, axis=1)).T
+
+class MultiprobeMarkedPoissonHMM(_BaseHMM):
+    """Hidden Markov Model with independent Poisson emissions,
+       where only marks are observed, and not the identities of the clusters.
+
+    Parameters
+    ----------
+
+    Attributes
+    ----------
+
+    Notes
+    -----
+    Observations are expected to have shape (n_probes, ) with each
+    element having shape (n_samples, ) with each element being an
+    array with shape (n_marks, mark_dims). It is therefore a ragged
+    array. Ragged arrays can be created be e.g. by
+        >>> marks = np.array(n_samples*[None]), and then setting
+    each element accordingly.
+
+    """
+
+    def __init__(self, n_components=1, n_clusters=1,
+                 cluster_means=None, cluster_covars=None, covariance_type='diag',
+                 min_rate=0, rate_mode='absolute',
+                 startprob_prior=1.0, transmat_prior=1.0,
+                 rate_prior=0, rate_weight=0,
+                 algorithm="viterbi", random_state=None,
+                 n_iter=10, n_samples=1e6, tol=1e-2, verbose=False,
+                 params="str", init_params="strc", stype='unbiased', reorder=False):
+        _BaseHMM.__init__(self, n_components,
+                          startprob_prior=startprob_prior,
+                          transmat_prior=transmat_prior, algorithm=algorithm,
+                          random_state=random_state, n_iter=n_iter,
+                          tol=tol, params=params, verbose=verbose,
+                          init_params=init_params)
+
+        self._BaseHMM__is_clusterless = True
+
+        self.rate_mode = rate_mode
+        self.min_rate = min_rate
+        self.rate_prior = rate_prior
+        self.rate_weight = rate_weight
+        self.n_samples = int(n_samples)
+        self.n_clusters = n_clusters           # per-probe
+        self.cluster_means = cluster_means     # per-probe
+        self.cluster_covars = cluster_covars   # per-probe
+        self.covariance_type = covariance_type
+        self.stype = stype
+        self.reorder = reorder
+        self.n_probes = len(n_clusters)
+
+    @property
+    def covars_(self):
+        """Return covars as full matrices."""
+        covars = np.array(self.n_probes*[None])
+        for probe in range(self.n_probes):
+            covars[probe] = fill_covars(self.cluster_covars[probe],
+                                        self.covariance_type,
+                                        self.n_clusters[probe],
+                                        self.cluster_dim)
+        return covars
+
+    @covars_.setter
+    def covars_(self, covars):
+        self.cluster_covars = np.asarray(covars).copy()
+
+    def _check(self):
+        super(MultiprobeMarkedPoissonHMM, self)._check()
+
+        self.rate_ = np.asarray(self.rate_)
+        assert np.sum(self.n_clusters) == self.rate_.shape[1]
+
+        if self.covariance_type not in COVARIANCE_TYPES:
+            raise ValueError('covariance_type must be one of {}'
+                             .format(COVARIANCE_TYPES))
+
+        for probe in range(self.n_probes):
+            _utils._validate_covars(self.cluster_covars[probe], self.covariance_type,
+                                    self.n_clusters[probe])
+
+            assert self.cluster_means[probe].shape[0] == self.n_clusters[probe]
+        self.cluster_dim = self.cluster_means[0].shape[1]
+
+        for probe in range(self.n_probes):
+            assert self.covars_[probe].shape[0] == self.n_clusters[probe]
+            assert self.covars_[probe].shape[1] == self.cluster_dim
+            assert self.covars_[probe].shape[2] == self.cluster_dim
+
+    def _compute_log_likelihood(self, obs):
+        return mp_log_marked_poisson_density(obs,
+                                          self.rate_,
+                                          self.cluster_ids,
+                                          self.cluster_means,
+                                          self.cluster_covars,
+                                          self.n_samples,
+                                          self.stype,
+                                          self.random_state,
+                                          self.reorder)
+
+    def _generate_sample_from_state(self, state, random_state=None):
+        raise NotImplementedError
+
+    def _init(self, X, lengths=None):
+        super(MultiprobeMarkedPoissonHMM, self)._init(X, lengths=lengths)
+
+        assert self.n_probes == len(X)
+
+        if 'c' in self.init_params:
+            # do GMM here to estimate cluster means and covariances.
+
+            from sklearn import mixture
+
+            if self.verbose:
+                message = "Initializing cluster parameters with a Gaussian mixture model"
+                print(message, file=sys.stderr)
+
+            self.cluster_means = np.array(self.n_probes*[None])
+            self.cluster_covars = np.array(self.n_probes*[None])
+
+            for probe in range(self.n_probes):
+                data = X[probe]
+                flattened = []
+                for sample in data:
+                    if np.any(sample):
+                        for mark in sample:
+                            flattened.append(mark)
+                flattened = np.array(flattened)
+
+                gmm = mixture.GaussianMixture(n_components=self.n_clusters[probe],
+                                    covariance_type=self.covariance_type,
+                                    verbose=self.verbose, random_state=self.random_state)
+                gmm.fit(flattened)
+
+                self.cluster_means[probe] = gmm.means_
+                self.cluster_covars[probe] = gmm.covariances_
+
+        if 'r' in self.init_params or not hasattr(self, "rate_"):
+            # maybe do gamma-sampled normalized rates?
+            if self.verbose:
+                message = "Initializing cluster rates with a Gamma prior"
+                print(message, file=sys.stderr)
+
+            rng = check_random_state(self.random_state)
+            r = rng.gamma(1,1, size=(self.n_components, np.sum(self.n_clusters)))
+            r = (r.T/np.sum(r, axis=1)).T
+            self.rate_ = r
+
+        if self.verbose:
+            message = "Done\n"
+            print(message, file=sys.stderr)
+
+    def _initialize_sufficient_statistics(self):
+        stats = super(MultiprobeMarkedPoissonHMM, self)._initialize_sufficient_statistics()
+        stats['post'] = np.zeros(self.n_components)
+        stats['numerator'] = np.zeros((self.n_components, np.sum(self.n_clusters)))
+        return stats
+
+    @property
+    def cluster_ids(self):
+        cluster_ids = np.array(self.n_probes*[None])
+        count = 0
+        for probe in range(self.n_probes):
+            n_clusters = self.n_clusters[probe]
+            cluster_ids[probe] = list(range(count, count+n_clusters))
+            count += n_clusters
+        return cluster_ids
+
+    def _accumulate_sufficient_statistics(self, stats, obs, framelogprob,
+                                          posteriors, fwdlattice, bwdlattice):
+        super(MultiprobeMarkedPoissonHMM, self)._accumulate_sufficient_statistics(
+            stats, obs, framelogprob, posteriors, fwdlattice, bwdlattice)
+
+        # stats['post'] contains (n_samples, n_components) posteriors over states (gammas)
+        # stats['numerator'] contains (n_components, n_clusters) rate updates
+
+        if 'r' in self.params:
+            stats['post'] += posteriors.sum(axis=0)
+
+            # expected rates (n_samples, n_clusters), where n_clusters is the
+            # latent number of neurons.
+
+            n_samples = len(obs[0])
+            N_total = np.sum(self.n_clusters)
+            Z = self.n_components
+            cluster_means = self.cluster_means
+            covars = self.covars_
+
+            numerator = np.zeros((Z, N_total))
+
+            R = self.rate_
+
+            for zz in range(Z):
+                r = R[zz,:].squeeze()
+                expected_rates = np.zeros((n_samples, N_total))
+
+                for probe in range(self.n_probes):
+                    r = R[zz, self.cluster_ids[probe]].squeeze()
+                    X = obs[probe]
+                    N = len(self.cluster_ids[probe])
+                    for mm, marks in enumerate(X):
+                        K = len(marks)
+
+                        if K > 0:
+                            logF = np.zeros((N, K))
+                            for nn in range(N):
+                                mvn = multivariate_normal(mean=cluster_means[probe][nn], cov=covars[probe][nn])
+                                f = np.atleast_1d(mvn.logpdf(marks))
+                                f[f < MIN_LOGLIKELIHOOD] = MIN_LOGLIKELIHOOD
+                                logF[nn,:] = f
+
+                            den = logsumexp((logF.T + np.log(r)).T , axis=0)
+
+                            logmnp = np.zeros((N,K))
+                            for nn in range(N):
+                                for kk in range(K):
+                                    logmnp[nn,kk] = logF[nn,kk] + np.log(r[nn]) - den[kk]
+
+                            if self.rate_mode == 'relative':
+                                expected_rates[mm,self.cluster_ids[probe]] = np.exp(logsumexp(logmnp, axis=1) - np.log(K))
+                            elif self.rate_mode == 'absolute':
+                                expected_rates[mm,self.cluster_ids[probe]] = np.exp(logsumexp(logmnp, axis=1))
+                        else:
+                            expected_rates[mm,self.cluster_ids[probe]] = np.ones(N) * self.min_rate
+
+                numerator[zz,:] = np.dot(posteriors[:,zz].T, expected_rates)
+
+            stats['numerator'] += numerator
+
+    def _do_mstep(self, stats):
+        super(MultiprobeMarkedPoissonHMM, self)._do_mstep(stats)
 
         rate_prior = self.rate_prior
         rate_weight = self.rate_weight
