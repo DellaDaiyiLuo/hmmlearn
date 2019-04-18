@@ -1398,6 +1398,15 @@ class MultiprobeMarkedPoissonHMM(_BaseHMM):
         >>> marks = np.array(n_samples*[None]), and then setting
     each element accordingly.
 
+    UPDATE
+    ------
+    hmmlearn doesn't work with (n_probes, ) data. It requires (n_samples, ) type
+    data. We can get around this restriction during fit(), but not in decode(),
+    so we have to re-work this class again.
+
+    We now require (n_samples, n_probes, )-->(n_marks*, n_dims) data, which is
+    ugly, but I don't think we have much of a choice here. *variable number.
+
     """
 
     def __init__(self, n_components=1, n_clusters=1,
@@ -1468,6 +1477,7 @@ class MultiprobeMarkedPoissonHMM(_BaseHMM):
             assert self.covars_[probe].shape[2] == self.cluster_dim
 
     def _compute_log_likelihood(self, obs):
+        """obs has shape (n_samples, n_probes)-->(n_marks*, n_dims)"""
         return mp_log_marked_poisson_density(obs,
                                           self.rate_,
                                           self.cluster_ids,
@@ -1484,7 +1494,8 @@ class MultiprobeMarkedPoissonHMM(_BaseHMM):
     def _init(self, X, lengths=None):
         super(MultiprobeMarkedPoissonHMM, self)._init(X, lengths=lengths)
 
-        assert self.n_probes == len(X)
+        n_samples, n_probes = X.shape
+        assert self.n_probes == n_probes
 
         if 'c' in self.init_params:
             # do GMM here to estimate cluster means and covariances.
@@ -1499,7 +1510,7 @@ class MultiprobeMarkedPoissonHMM(_BaseHMM):
             self.cluster_covars = np.array(self.n_probes*[None])
 
             for probe in range(self.n_probes):
-                data = X[probe]
+                data = X[:,probe]
                 flattened = []
                 for sample in data:
                     if np.any(sample):
@@ -1560,7 +1571,7 @@ class MultiprobeMarkedPoissonHMM(_BaseHMM):
             # expected rates (n_samples, n_clusters), where n_clusters is the
             # latent number of neurons.
 
-            n_samples = len(obs[0])
+            n_samples = len(obs)
             N_total = np.sum(self.n_clusters)
             Z = self.n_components
             cluster_means = self.cluster_means
@@ -1571,12 +1582,11 @@ class MultiprobeMarkedPoissonHMM(_BaseHMM):
             R = self.rate_
 
             for zz in range(Z):
-                r = R[zz,:].squeeze()
                 expected_rates = np.zeros((n_samples, N_total))
 
                 for probe in range(self.n_probes):
                     r = R[zz, self.cluster_ids[probe]].squeeze()
-                    X = obs[probe]
+                    X = obs[:,probe]
                     N = len(self.cluster_ids[probe])
                     for mm, marks in enumerate(X):
                         K = len(marks)

@@ -455,15 +455,14 @@ def mp_log_marked_poisson_density(X, rates, cluster_ids, cluster_means,
 
     n_processes = psutil.cpu_count()
 
-    n_probes = len(X)
+    n_obs, n_probes = X.shape
     n_components, n_clusters = rates.shape
-    n_obs = len(X[0])
     lpr = np.zeros((n_obs, n_components))
 
     for zz in range(n_components):
         temp = np.zeros((n_probes, n_obs))
         for probe in range(n_probes):
-            data = X[probe]
+            data = X[:,probe]
             r = rates[zz,cluster_ids[probe]].squeeze()
             with mp.Pool(processes=n_processes) as pool:
                 results = [pool.apply_async(eval_P_Y_given_ISR,
