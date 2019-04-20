@@ -1217,6 +1217,166 @@ class MarkedPoissonHMM(_BaseHMM):
         self.covariance_type = covariance_type
         self.stype = stype
         self.reorder = reorder
+        self._already_initialized = False
+
+    def plot_marks(self, obs, *, figsize=None, n_cols=None,  **kwargs):
+        """obs has shape (n_samples, )-->(n_marks, n_dim)."""
+        from itertools import combinations
+        from seaborn import despine
+        import matplotlib.pyplot as plt
+
+        def flatten_obs(obs):
+            flattened = []
+            for sample in obs:
+                for mark in sample:
+                    flattened.append(mark)
+            flattened = np.array(flattened)
+
+            return flattened
+
+        def no_xticklabels(*axes):
+            """Remove the tick labels on the x-axis (but leave the tick marks).
+
+            Parameters
+            ----------
+            ax : axis object (default=pyplot.gca())
+
+            """
+            if len(axes) == 0:
+                axes = [plt.gca()]
+            for ax in axes:
+                ax.set_xticklabels([])
+
+        def no_yticklabels(*axes):
+            """Remove the tick labels on the y-axis (but leave the tick marks).
+
+            Parameters
+            ----------
+            ax : axis object (default=pyplot.gca())
+
+            """
+            if len(axes) == 0:
+                axes = [plt.gca()]
+            for ax in axes:
+                ax.set_yticklabels([])
+
+        X = flatten_obs(obs)
+        n_spikes, n_dims = X.shape
+
+        pairs = []
+        for val in combinations(range(n_dims), r=2):
+            pairs.append(val)
+
+        if n_cols is None:
+            n_cols = 3
+
+        n_pairs = len(pairs)
+        n_rows = int(np.ceil(n_pairs / n_cols))
+
+        if figsize is None:
+            figsize = (12, 3*n_rows)
+
+        f, axes = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=figsize)
+        axes = np.ravel(axes)
+
+        used_axes = np.zeros(len(axes))
+        for pp, pair in enumerate(pairs):
+            axes[pp].set_xlabel('feature {}'.format(pair[0]))
+            axes[pp].set_ylabel('feature {}'.format(pair[1]))
+            used_axes[pp] = 1
+            no_xticklabels()
+            no_yticklabels()
+            despine()
+
+            axes[pp].plot(X[:,pair[0]], X[:,pair[1]], '.', **kwargs)
+
+        for pp, ax in enumerate(axes):
+            if not used_axes[pp]:
+                ax.axis('off')
+
+        return f
+
+    def plot_clusters(self, obs, *, figsize=None, n_cols=None,  **kwargs):
+        """obs has shape (n_samples, )-->(n_marks, n_dim)."""
+        from itertools import combinations
+        from seaborn import despine
+        import matplotlib.pyplot as plt
+
+        def flatten_obs(obs):
+            flattened = []
+            for sample in obs:
+                for mark in sample:
+                    flattened.append(mark)
+            flattened = np.array(flattened)
+
+            return flattened
+
+        def no_xticklabels(*axes):
+            """Remove the tick labels on the x-axis (but leave the tick marks).
+
+            Parameters
+            ----------
+            ax : axis object (default=pyplot.gca())
+
+            """
+            if len(axes) == 0:
+                axes = [plt.gca()]
+            for ax in axes:
+                ax.set_xticklabels([])
+
+        def no_yticklabels(*axes):
+            """Remove the tick labels on the y-axis (but leave the tick marks).
+
+            Parameters
+            ----------
+            ax : axis object (default=pyplot.gca())
+
+            """
+            if len(axes) == 0:
+                axes = [plt.gca()]
+            for ax in axes:
+                ax.set_yticklabels([])
+
+        X = flatten_obs(obs)
+        n_spikes, n_dims = X.shape
+
+        mark_ids = self._gmm.predict(X)
+        n_clusters = np.max(mark_ids)
+
+        pairs = []
+        for val in combinations(range(n_dims), r=2):
+            pairs.append(val)
+
+        if n_cols is None:
+            n_cols = 3
+
+        n_pairs = len(pairs)
+        n_rows = int(np.ceil(n_pairs / n_cols))
+
+        if figsize is None:
+            figsize = (12, 3*n_rows)
+
+        f, axes = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=figsize)
+        axes = np.ravel(axes)
+
+        used_axes = np.zeros(len(axes))
+        for pp, pair in enumerate(pairs):
+            axes[pp].set_xlabel('feature {}'.format(pair[0]))
+            axes[pp].set_ylabel('feature {}'.format(pair[1]))
+            used_axes[pp] = 1
+            no_xticklabels()
+            no_yticklabels()
+            despine()
+            for mi in range(n_clusters+1):
+                if not np.any(mark_ids == mi):
+                    continue
+                axes[pp].plot(X[mark_ids==mi,pair[0]], X[mark_ids==mi,pair[1]], '.', **kwargs)
+
+        for pp, ax in enumerate(axes):
+            if not used_axes[pp]:
+                ax.axis('off')
+
+        return f
 
     @property
     def covars_(self):
@@ -1262,45 +1422,49 @@ class MarkedPoissonHMM(_BaseHMM):
         raise NotImplementedError
 
     def _init(self, X, lengths=None):
-        super(MarkedPoissonHMM, self)._init(X, lengths=lengths)
+        if not self._already_initialized:
+            super(MarkedPoissonHMM, self)._init(X, lengths=lengths)
 
-        if 'c' in self.init_params:
-            # do GMM here to estimate cluster means and covariances.
+            if 'c' in self.init_params:
+                # do GMM here to estimate cluster means and covariances.
 
-            from sklearn import mixture
+                from sklearn import mixture
+
+                if self.verbose:
+                    message = "Initializing cluster parameters with a Gaussian mixture model"
+                    print(message, file=sys.stderr)
+
+                flattened = []
+                for mm in X:
+                    for mmm in mm:
+                        flattened.append(mmm)
+                flattened = np.array(flattened)
+
+                gmm = mixture.GaussianMixture(n_components=self.n_clusters,
+                                    covariance_type=self.covariance_type,
+                                    verbose=self.verbose, random_state=self.random_state)
+                gmm.fit(flattened)
+                self._gmm = gmm
+
+                self.cluster_means = gmm.means_
+                self.cluster_covars = gmm.covariances_
+
+            if 'r' in self.init_params or not hasattr(self, "rate_"):
+                # maybe do gamma-sampled normalized rates?
+                if self.verbose:
+                    message = "Initializing cluster rates with a Gamma prior"
+                    print(message, file=sys.stderr)
+
+                rng = check_random_state(self.random_state)
+                r = rng.gamma(1,1, size=(self.n_components, self.n_clusters))
+                r = (r.T/np.sum(r, axis=1)).T
+                self.rate_ = r
 
             if self.verbose:
-                message = "Initializing cluster parameters with a Gaussian mixture model"
+                message = "Done\n"
                 print(message, file=sys.stderr)
 
-            flattened = []
-            for mm in X:
-                for mmm in mm:
-                    flattened.append(mmm)
-            flattened = np.array(flattened)
-
-            gmm = mixture.GaussianMixture(n_components=self.n_clusters,
-                                  covariance_type=self.covariance_type,
-                                  verbose=self.verbose, random_state=self.random_state)
-            gmm.fit(flattened)
-
-            self.cluster_means = gmm.means_
-            self.cluster_covars = gmm.covariances_
-
-        if 'r' in self.init_params or not hasattr(self, "rate_"):
-            # maybe do gamma-sampled normalized rates?
-            if self.verbose:
-                message = "Initializing cluster rates with a Gamma prior"
-                print(message, file=sys.stderr)
-
-            rng = check_random_state(self.random_state)
-            r = rng.gamma(1,1, size=(self.n_components, self.n_clusters))
-            r = (r.T/np.sum(r, axis=1)).T
-            self.rate_ = r
-
-        if self.verbose:
-            message = "Done\n"
-            print(message, file=sys.stderr)
+            self._already_initialized = True
 
     def _initialize_sufficient_statistics(self):
         stats = super(MarkedPoissonHMM, self)._initialize_sufficient_statistics()
@@ -1438,6 +1602,172 @@ class MultiprobeMarkedPoissonHMM(_BaseHMM):
         self.stype = stype
         self.reorder = reorder
         self.n_probes = len(n_clusters)
+        self._already_initialized = False
+
+    def plot_marks(self, obs, probe, *, figsize=None, n_cols=None,  **kwargs):
+        """obs has shape (n_samples, )-->(n_marks, n_dim)."""
+        from itertools import combinations
+        from seaborn import despine
+        import matplotlib.pyplot as plt
+
+        n_samples, n_probes = obs.shape
+        data = obs[:,probe]
+
+        def flatten_obs(obs):
+            flattened = []
+            for sample in data:
+                if np.any(sample):
+                    for mark in sample:
+                        flattened.append(mark)
+            flattened = np.array(flattened)
+            return flattened
+
+        def no_xticklabels(*axes):
+            """Remove the tick labels on the x-axis (but leave the tick marks).
+
+            Parameters
+            ----------
+            ax : axis object (default=pyplot.gca())
+
+            """
+            if len(axes) == 0:
+                axes = [plt.gca()]
+            for ax in axes:
+                ax.set_xticklabels([])
+
+        def no_yticklabels(*axes):
+            """Remove the tick labels on the y-axis (but leave the tick marks).
+
+            Parameters
+            ----------
+            ax : axis object (default=pyplot.gca())
+
+            """
+            if len(axes) == 0:
+                axes = [plt.gca()]
+            for ax in axes:
+                ax.set_yticklabels([])
+
+        X = flatten_obs(data)
+        n_spikes, n_dims = X.shape
+
+        pairs = []
+        for val in combinations(range(n_dims), r=2):
+            pairs.append(val)
+
+        if n_cols is None:
+            n_cols = 3
+
+        n_pairs = len(pairs)
+        n_rows = int(np.ceil(n_pairs / n_cols))
+
+        if figsize is None:
+            figsize = (12, 3*n_rows)
+
+        f, axes = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=figsize)
+        axes = np.ravel(axes)
+
+        used_axes = np.zeros(len(axes))
+        for pp, pair in enumerate(pairs):
+            axes[pp].set_xlabel('feature {}'.format(pair[0]))
+            axes[pp].set_ylabel('feature {}'.format(pair[1]))
+            used_axes[pp] = 1
+            no_xticklabels()
+            no_yticklabels()
+            despine()
+
+            axes[pp].plot(X[:,pair[0]], X[:,pair[1]], '.', **kwargs)
+
+        for pp, ax in enumerate(axes):
+            if not used_axes[pp]:
+                ax.axis('off')
+
+        return f
+
+    def plot_clusters(self, obs, probe, *, figsize=None, n_cols=None,  **kwargs):
+        """obs has shape (n_samples, )-->(n_marks, n_dim)."""
+        from itertools import combinations
+        from seaborn import despine
+        import matplotlib.pyplot as plt
+
+        def flatten_obs(obs):
+            flattened = []
+            for sample in obs:
+                for mark in sample:
+                    flattened.append(mark)
+            flattened = np.array(flattened)
+
+            return flattened
+
+        def no_xticklabels(*axes):
+            """Remove the tick labels on the x-axis (but leave the tick marks).
+
+            Parameters
+            ----------
+            ax : axis object (default=pyplot.gca())
+
+            """
+            if len(axes) == 0:
+                axes = [plt.gca()]
+            for ax in axes:
+                ax.set_xticklabels([])
+
+        def no_yticklabels(*axes):
+            """Remove the tick labels on the y-axis (but leave the tick marks).
+
+            Parameters
+            ----------
+            ax : axis object (default=pyplot.gca())
+
+            """
+            if len(axes) == 0:
+                axes = [plt.gca()]
+            for ax in axes:
+                ax.set_yticklabels([])
+
+        n_samples, n_probes = obs.shape
+        data = obs[:,probe]
+
+        X = flatten_obs(data)
+        n_spikes, n_dims = X.shape
+
+        mark_ids = self._gmm[probe].predict(X)
+        n_clusters = np.max(mark_ids)
+
+        pairs = []
+        for val in combinations(range(n_dims), r=2):
+            pairs.append(val)
+
+        if n_cols is None:
+            n_cols = 3
+
+        n_pairs = len(pairs)
+        n_rows = int(np.ceil(n_pairs / n_cols))
+
+        if figsize is None:
+            figsize = (12, 3*n_rows)
+
+        f, axes = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=figsize)
+        axes = np.ravel(axes)
+
+        used_axes = np.zeros(len(axes))
+        for pp, pair in enumerate(pairs):
+            axes[pp].set_xlabel('feature {}'.format(pair[0]))
+            axes[pp].set_ylabel('feature {}'.format(pair[1]))
+            used_axes[pp] = 1
+            no_xticklabels()
+            no_yticklabels()
+            despine()
+            for mi in range(n_clusters+1):
+                if not np.any(mark_ids == mi):
+                    continue
+                axes[pp].plot(X[mark_ids==mi,pair[0]], X[mark_ids==mi,pair[1]], '.', **kwargs)
+
+        for pp, ax in enumerate(axes):
+            if not used_axes[pp]:
+                ax.axis('off')
+
+        return f
 
     @property
     def covars_(self):
@@ -1492,54 +1822,59 @@ class MultiprobeMarkedPoissonHMM(_BaseHMM):
         raise NotImplementedError
 
     def _init(self, X, lengths=None):
-        super(MultiprobeMarkedPoissonHMM, self)._init(X, lengths=lengths)
+        if not self._already_initialized:
+            super(MultiprobeMarkedPoissonHMM, self)._init(X, lengths=lengths)
 
-        n_samples, n_probes = X.shape
-        assert self.n_probes == n_probes
+            n_samples, n_probes = X.shape
+            assert self.n_probes == n_probes
 
-        if 'c' in self.init_params:
-            # do GMM here to estimate cluster means and covariances.
+            if 'c' in self.init_params:
+                # do GMM here to estimate cluster means and covariances.
 
-            from sklearn import mixture
+                from sklearn import mixture
+
+                if self.verbose:
+                    message = "Initializing cluster parameters with a Gaussian mixture model"
+                    print(message, file=sys.stderr)
+
+                self.cluster_means = np.array(self.n_probes*[None])
+                self.cluster_covars = np.array(self.n_probes*[None])
+
+                self._gmm = np.array(self.n_probes*[None])
+                for probe in range(self.n_probes):
+                    data = X[:,probe]
+                    flattened = []
+                    for sample in data:
+                        if np.any(sample):
+                            for mark in sample:
+                                flattened.append(mark)
+                    flattened = np.array(flattened)
+
+                    gmm = mixture.GaussianMixture(n_components=self.n_clusters[probe],
+                                        covariance_type=self.covariance_type,
+                                        verbose=self.verbose, random_state=self.random_state)
+                    gmm.fit(flattened)
+                    self._gmm[probe] = gmm
+
+                    self.cluster_means[probe] = gmm.means_
+                    self.cluster_covars[probe] = gmm.covariances_
+
+            if 'r' in self.init_params or not hasattr(self, "rate_"):
+                # maybe do gamma-sampled normalized rates?
+                if self.verbose:
+                    message = "Initializing cluster rates with a Gamma prior"
+                    print(message, file=sys.stderr)
+
+                rng = check_random_state(self.random_state)
+                r = rng.gamma(1,1, size=(self.n_components, np.sum(self.n_clusters)))
+                r = (r.T/np.sum(r, axis=1)).T
+                self.rate_ = r
 
             if self.verbose:
-                message = "Initializing cluster parameters with a Gaussian mixture model"
+                message = "Done\n"
                 print(message, file=sys.stderr)
 
-            self.cluster_means = np.array(self.n_probes*[None])
-            self.cluster_covars = np.array(self.n_probes*[None])
-
-            for probe in range(self.n_probes):
-                data = X[:,probe]
-                flattened = []
-                for sample in data:
-                    if np.any(sample):
-                        for mark in sample:
-                            flattened.append(mark)
-                flattened = np.array(flattened)
-
-                gmm = mixture.GaussianMixture(n_components=self.n_clusters[probe],
-                                    covariance_type=self.covariance_type,
-                                    verbose=self.verbose, random_state=self.random_state)
-                gmm.fit(flattened)
-
-                self.cluster_means[probe] = gmm.means_
-                self.cluster_covars[probe] = gmm.covariances_
-
-        if 'r' in self.init_params or not hasattr(self, "rate_"):
-            # maybe do gamma-sampled normalized rates?
-            if self.verbose:
-                message = "Initializing cluster rates with a Gamma prior"
-                print(message, file=sys.stderr)
-
-            rng = check_random_state(self.random_state)
-            r = rng.gamma(1,1, size=(self.n_components, np.sum(self.n_clusters)))
-            r = (r.T/np.sum(r, axis=1)).T
-            self.rate_ = r
-
-        if self.verbose:
-            message = "Done\n"
-            print(message, file=sys.stderr)
+            self._already_initialized = True
 
     def _initialize_sufficient_statistics(self):
         stats = super(MultiprobeMarkedPoissonHMM, self)._initialize_sufficient_statistics()

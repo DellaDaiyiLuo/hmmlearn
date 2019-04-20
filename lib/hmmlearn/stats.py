@@ -476,7 +476,7 @@ def mp_log_marked_poisson_density(X, rates, cluster_ids, cluster_means,
                         'reorder':reorder}) for obs in data]
                 results = [p.get() for p in results]
             temp[probe,:] = results
-        temp = logsumexp(temp, axis=0)
+        temp = np.sum(temp, axis=0)
         lpr[:,zz] = temp
 
     lprs = np.sum(lpr, axis=1)
