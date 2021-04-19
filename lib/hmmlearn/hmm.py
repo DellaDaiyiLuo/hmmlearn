@@ -1095,10 +1095,9 @@ class PoissonHMM(_BaseHMM):
 
         self.n_features = n_features
         if 'm' in self.init_params or not hasattr(self, "means_"):
-            kmeans = cluster.KMeans(n_clusters=self.n_components,
-                                    random_state=self.random_state)
-            kmeans.fit(X)
-            self.means_ = kmeans.cluster_centers_
+            gm = GaussianMixture(n_components=self.n_components,random_state=self.random_state,covariance_type='full') 
+            gm.fit(X)
+            self.means_ = gm.means_
 
     def _initialize_sufficient_statistics(self):
         stats = super(PoissonHMM, self)._initialize_sufficient_statistics()
