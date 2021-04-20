@@ -715,7 +715,8 @@ class _BaseHMM(BaseEstimator):
                                        self.startprob_, startprob_)
             normalize(self.startprob_)
         if 't' in self.params:
-            transmat_ = self.transmat_prior - 1.0 + stats['trans']
-            self.transmat_ = np.where(self.transmat_ == 0.0,
-                                      self.transmat_, transmat_)
+            self.transmat_ = stats['trans']
+            for zerorow in np.where(stats['trans'].sum(axis=1)==0)[0]:
+                self.transmat_[zerorow,:] = 1
+                print(f"{zerorow}")
             normalize(self.transmat_, axis=1)
